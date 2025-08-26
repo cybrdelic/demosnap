@@ -1,0 +1,18 @@
+name: Example Flow
+viewport:
+  width: 1280
+  height: 720
+steps:
+  - action: goto
+    url: https://example.com
+  - action: wait
+    ms: 1200
+  - action: scroll
+    y: 800
+    smooth: true
+  - action: wait
+    ms: 800
+  - action: scroll
+    y: 0
+  - action: broll
+    duration: 3000

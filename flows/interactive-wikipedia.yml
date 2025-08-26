@@ -1,0 +1,31 @@
+name: Wikipedia Interactive
+viewport:
+  width: 1280
+  height: 720
+steps:
+  - action: goto
+    url: https://www.wikipedia.org
+  - action: wait
+    selector: input[name="search"]
+  - action: click
+    selector: input[name="search"]
+  - action: type
+    selector: input[name="search"]
+    text: Three.js
+    delay: 90
+  - action: wait
+    ms: 400
+  - action: click
+    selector: button.pure-button-primary-progressive
+  - action: wait
+    selector: #firstHeading
+  - action: scroll
+    y: 1200
+    smooth: true
+  - action: wait
+    ms: 500
+  - action: scroll
+    y: 0
+    smooth: true
+  - action: broll
+    duration: 2500
