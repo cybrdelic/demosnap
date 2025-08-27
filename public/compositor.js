@@ -209,8 +209,8 @@ if (window.__COMPOSITOR_RAN) {
     postScene.add(quad);
     const postCam = new OrthographicCamera(-1,1,1,-1,0,1);
 
-    // Focus / zoom program variables
-  const focusEvents = timeline.filter(ev=> ev.type==='click' || ev.type==='type' || ev.type==='type-char');
+    // Focus / zoom program variables (exclude per-character jitter; include prefocus + wait)
+  const focusEvents = timeline.filter(ev=> ev.type==='click' || ev.type==='type' || ev.type==='prefocus' || ev.type==='wait');
     let activeFocus = null; // {t,cx,cy,zoom,bbox,w,h}
     let focusScale = 1; // actual scale factor applied (1 = no zoom)
     let focusScaleTarget = 1;
@@ -345,6 +345,23 @@ if (window.__COMPOSITOR_RAN) {
         keys.push({ t: ev.t, cx: ev.x, cy: ev.y, zoom: zBase, cut: ev.type === 'click' });
       }
       keys.sort((a,b)=>a.t-b.t);
+      // Cluster keys that are very close in time (avoid rapid tiny camera shifts for consecutive related events)
+      const clustered = [];
+      const CLUSTER_MS = 500;
+      for (const k of keys) {
+        const prev = clustered[clustered.length-1];
+        if (prev && (k.t - prev.t) < CLUSTER_MS) {
+          // Merge by averaging position and taking max zoom (for stronger emphasis)
+          prev.cx = prev.cx*0.5 + k.cx*0.5;
+          prev.cy = prev.cy*0.5 + k.cy*0.5;
+          prev.zoom = Math.max(prev.zoom, k.zoom);
+          prev.cut = prev.cut || k.cut;
+        } else {
+          clustered.push({...k});
+        }
+      }
+      // Replace keys with clustered
+      keys.length = 0; keys.push(...clustered);
       if (keys.length && keys[0].t > 0) keys.unshift({ t: 0, cx:0.5, cy:0.5, zoom:1.0 });
       return keys;
     })();
@@ -405,7 +422,15 @@ if (window.__COMPOSITOR_RAN) {
     accTime = 0; accFrames = 0; evalTimer = 0;
   }
   // Determine focus inside video plane normalized (-8..8 horizontally, -4.5..4.5 vertically because plane 16x9 centered)
-  const focus = sampleCam((t - startTime));
+  const rawCam = sampleCam((t - startTime));
+  // Low-pass filter for smoother, more cinematic motion
+  if(!window.__smoothCam){ window.__smoothCam = { cx: rawCam.cx, cy: rawCam.cy, zoom: rawCam.zoom }; }
+  const smoothCam = window.__smoothCam;
+  const camEase = 0.08; // lower = smoother
+  smoothCam.cx += (rawCam.cx - smoothCam.cx) * camEase;
+  smoothCam.cy += (rawCam.cy - smoothCam.cy) * camEase;
+  smoothCam.zoom += (rawCam.zoom - smoothCam.zoom) * (camEase*0.85);
+  const focus = { ...rawCam, cx: smoothCam.cx, cy: smoothCam.cy, zoom: smoothCam.zoom };
   const fx = (focus.cx - 0.5) * 16; // map to plane local coords width 16
   const fy = (0.5 - focus.cy) * 9;  // invert y
 
@@ -443,12 +468,7 @@ if (window.__COMPOSITOR_RAN) {
       // Fast ease toward target (very snappy => higher smoothing factor)
   // Slightly snappier interpolation toward target
       focusScale += (focusScaleTarget - focusScale) * 0.46;
-      // Micro pulses for rapid type-char events (recent within 140ms)
-      const recentChar = timeline.slice(-12).reverse().find(ev=> ev.type==='type-char' && (relMs - ev.t) < 140);
-      if (recentChar) {
-        const pulse = 1 + Math.min(0.06, (140-(relMs-recentChar.t))/140 * 0.06);
-        focusScale *= pulse;
-      }
+  // Removed per-character micro pulses for calmer aesthetic framing
       if (Math.abs(focusScale - 1) < 0.002) focusScale = 1;
 
   if (theme === 'teaser') {
@@ -502,9 +522,10 @@ if (window.__COMPOSITOR_RAN) {
   }
   // Simulate quick “cut” flash by brief exposure tweak
   if (focus.cut) {
-  renderer.toneMappingExposure = 1.5;
+    // Softer cut flash for less harsh transitions
+    renderer.toneMappingExposure = 1.18;
   } else {
-    renderer.toneMappingExposure += (1 - renderer.toneMappingExposure)*0.08;
+    renderer.toneMappingExposure += (1 - renderer.toneMappingExposure)*0.04;
   }
   // Two-pass render: base scene -> RT, then post quad with edge-lift shader -> screen
   renderer.setRenderTarget(rt);
