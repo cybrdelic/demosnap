@@ -3,14 +3,15 @@ import YAML from 'yaml';
 // Fallback: explicit any for Page to avoid type resolution issues
 type Page = any;
 
+// Each step can optionally be marked optional:true to skip on failure (e.g., selector not found)
 export type FlowStep =
-  | { action: 'goto'; url: string }
-  | { action: 'click'; selector: string }
-  | { action: 'type'; selector: string; text: string; delay?: number }
-  | { action: 'wait'; ms?: number; selector?: string }
-  | { action: 'scroll'; y?: number; selector?: string; smooth?: boolean }
-  | { action: 'sleep'; ms: number }
-  | { action: 'broll'; duration: number };
+  | { action: 'goto'; url: string; optional?: boolean }
+  | { action: 'click'; selector: string; optional?: boolean }
+  | { action: 'type'; selector: string; text: string; delay?: number; optional?: boolean }
+  | { action: 'wait'; ms?: number; selector?: string; optional?: boolean }
+  | { action: 'scroll'; y?: number; selector?: string; smooth?: boolean; optional?: boolean }
+  | { action: 'sleep'; ms: number; optional?: boolean }
+  | { action: 'broll'; duration: number; optional?: boolean };
 
 export interface FlowEvent {
   t: number; // ms from start
@@ -87,7 +88,8 @@ export async function runFlow(page: Page, flow: FlowDefinition, opts: RunFlowOpt
 
   for (const [i, step] of flow.steps.entries()) {
     log('step', i, step.action, JSON.stringify(step));
-    switch (step.action) {
+    const exec = async () => {
+      switch (step.action) {
       case 'goto':
         await page.goto(step.url, { waitUntil: 'domcontentloaded' });
         await ensureOverlay();
@@ -98,6 +100,11 @@ export async function runFlow(page: Page, flow: FlowDefinition, opts: RunFlowOpt
         await ensureOverlay();
         const pos = await moveCursorToSelector(step.selector);
         if (pos) {
+          // Emit an early prefocus event BEFORE the actual click so the compositor can start moving the camera toward this target.
+          try {
+            const box = await page.locator(step.selector).boundingBox();
+            if (box) pushEvent({ type: 'prefocus', selector: step.selector, x: (box.x+box.width/2)/ (await page.viewportSize()).width, y: (box.y+box.height/2)/ (await page.viewportSize()).height, w: box.width/ (await page.viewportSize()).width, h: box.height/ (await page.viewportSize()).height });
+          } catch {}
           await page.evaluate(({sel,x,y}: {sel:string;x:number;y:number}) => { const el = document.querySelector(sel); if (el) (window as any).__demoHighlight(el); (window as any).__demoClickEffect(x,y); }, { sel: step.selector, x: pos.cx, y: pos.cy });
           const box = await page.locator(step.selector).boundingBox();
           if (box) pushEvent({ type: 'click', selector: step.selector, x: (box.x+box.width/2)/ (await page.viewportSize()).width, y: (box.y+box.height/2)/ (await page.viewportSize()).height, w: box.width/ (await page.viewportSize()).width, h: box.height/ (await page.viewportSize()).height });
@@ -110,6 +117,11 @@ export async function runFlow(page: Page, flow: FlowDefinition, opts: RunFlowOpt
         await moveCursorToSelector(step.selector);
         await page.click(step.selector, { delay: 40 / speed });
         await page.fill(step.selector, '');
+        // Prefocus event at the start of typing to allow early camera zoom-in.
+        try {
+          const box = await page.locator(step.selector).boundingBox();
+          if (box) pushEvent({ type: 'prefocus', selector: step.selector, x: (box.x+box.width/2)/ (await page.viewportSize()).width, y: (box.y+box.height/2)/ (await page.viewportSize()).height, w: box.width/ (await page.viewportSize()).width, h: box.height/ (await page.viewportSize()).height });
+        } catch {}
         const delay = (step.delay ?? 70) / speed;
         // Type character by character to allow micro-event emission
         for (const ch of step.text.split('')) {
@@ -148,6 +160,14 @@ export async function runFlow(page: Page, flow: FlowDefinition, opts: RunFlowOpt
         await page.waitForTimeout(step.duration / speed); pushEvent({ type: 'broll' }); break;
       default:
         throw new Error(`Unknown step action at index ${i}`);
+      }
+    };
+    try {
+      await exec();
+    } catch (err) {
+      if ((step as any).optional) {
+        log('optional step failed, skipping', i, step.action, (err as Error).message);
+      } else throw err;
     }
   }
   return events;

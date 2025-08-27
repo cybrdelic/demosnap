@@ -13,19 +13,60 @@ steps:
     selector: input[name="search"]
     text: Three.js
     delay: 90
+  # Brief wait on suggestions list to capture dropdown for camera focus (prefocus & wait event)
+  - action: wait
+    selector: .suggestions-dropdown
+    optional: true
   - action: wait
     ms: 400
   - action: click
     selector: button.pure-button-primary-progressive
   - action: wait
     selector: #firstHeading
+  # Gentle pause on the article title
+  - action: sleep
+    ms: 800
+  # Smooth scroll down to show infobox + lead section
   - action: scroll
     y: 1200
     smooth: true
   - action: wait
-    ms: 500
+    ms: 600
+  # Scroll further to mid-page (features / examples region roughly)
+  - action: scroll
+    y: 2400
+    smooth: true
+  - action: wait
+    ms: 600
+  # Brief b‑roll hold for cinematic capture of mid content
+  - action: broll
+    duration: 1500
+  # Return near top to catch table of contents
   - action: scroll
     y: 0
     smooth: true
+  - action: wait
+    ms: 500
+  # Focus search (simulate refining / exploring)
+  - action: click
+    selector: input#searchInput
+    optional: true
+  - action: type
+    selector: input#searchInput
+    text:  examples
+    delay: 110
+    optional: true
+  - action: wait
+    ms: 300
+  # Clear (simple way: click and type with delay; for brevity we just broll after)
+  - action: broll
+    duration: 1200
+  # Final smooth scroll down a shorter distance for parallax variety
+  - action: scroll
+    y: 800
+    smooth: true
+  - action: wait
+    ms: 400
+  # Final hero b‑roll hold for compositing
   - action: broll
     duration: 2500

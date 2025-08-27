@@ -328,7 +328,20 @@ if (window.__COMPOSITOR_RAN) {
       const keys = [];
       for (const ev of timeline) {
         if (!('x' in ev) || ev.x == null) continue;
-        const zBase = ev.type === 'click' ? 1.6 : ev.type === 'type' ? 1.5 : 1.3;
+        // Treat prefocus as earlier anchor with slightly reduced zoom so we can ease in before action
+        let zBase = 1.25;
+        if (ev.type === 'prefocus') zBase = 1.35;
+        else if (ev.type === 'click') zBase = 1.7;
+        else if (ev.type === 'type') zBase = 1.55;
+        else if (ev.type === 'wait') zBase = 1.4;
+        // Derive additional zoom boost from element footprint (smaller element -> larger zoom)
+        if (ev.w && ev.h) {
+          const area = ev.w * ev.h; // normalized (0..1)
+            // Inverse relation: smaller area => larger zoom multiplier
+          const boost = Math.min(2.6, 1 + (0.25 - Math.min(0.25, area)) * 3.4);
+          zBase *= boost;
+        }
+        zBase = Math.min(zBase, 3.6); // safety clamp
         keys.push({ t: ev.t, cx: ev.x, cy: ev.y, zoom: zBase, cut: ev.type === 'click' });
       }
       keys.sort((a,b)=>a.t-b.t);
@@ -338,6 +351,19 @@ if (window.__COMPOSITOR_RAN) {
 
     function sampleCam(targetMs) {
       if (!camKeys.length) return { cx:0.5, cy:0.5, zoom:1.0, cut:false };
+      // Lead-in blending: if within lead window BEFORE next key, start easing toward it.
+      const lead = 650; // ms
+      // Find next key strictly after targetMs
+      const next = camKeys.find(k => k.t > targetMs);
+      if (next) {
+        const prevIndex = camKeys.indexOf(next) - 1;
+        const prev = prevIndex >= 0 ? camKeys[prevIndex] : camKeys[0];
+        if (targetMs >= next.t - lead && targetMs < next.t) {
+          const k = 1 - (next.t - targetMs) / lead; // 0..1 as we approach the key
+          const ease = k<0.5? 4*k*k*k : 1 - Math.pow(-2*k+2,3)/2;
+          return { cx: prev.cx + (next.cx - prev.cx)*ease, cy: prev.cy + (next.cy - prev.cy)*ease, zoom: prev.zoom + (next.zoom - prev.zoom)*ease*0.9, cut:false };
+        }
+      }
       for (let i=camKeys.length-1;i>=0;i--) {
         if (targetMs >= camKeys[i].t) {
           const a = camKeys[i];
