@@ -10,9 +10,21 @@
   h2 { font-size: clamp(1.1rem,2vw,1.6rem); margin:0; font-weight:400; opacity:.85; }
   .origin { position:absolute; bottom:1rem; right:1rem; font-size:.75rem; letter-spacing:.08em; opacity:.6; }
   canvas { display:block; }
+  /* Cinematic / teaser extras */
+  .letterbox { position:fixed; left:0; width:100%; height:13vh; background:linear-gradient(to bottom, rgba(0,0,0,.95), rgba(0,0,0,.6)); z-index:30; pointer-events:none; transform:translateY(-100%); animation:lbSlideTop 1.2s cubic-bezier(.4,0,.2,1) forwards; }
+  .letterbox.bottom { top:auto; bottom:0; transform:translateY(100%); background:linear-gradient(to top, rgba(0,0,0,.95), rgba(0,0,0,.6)); animation:lbSlideBottom 1.2s cubic-bezier(.4,0,.2,1) .05s forwards; }
+  @keyframes lbSlideTop { to { transform:translateY(0); } }
+  @keyframes lbSlideBottom { to { transform:translateY(0); } }
+  #overlay h1, #overlay h2 { opacity:0; transform:translateY(20px); animation:titleRise .9s cubic-bezier(.4,0,.2,1) 0.4s forwards; }
+  #overlay h2 { animation-delay:.65s; }
+  @keyframes titleRise { to { opacity:1; transform:translateY(0); } }
+  .vignette { position:fixed; inset:0; pointer-events:none; background:radial-gradient(circle at 50% 55%, rgba(0,0,0,0) 30%, rgba(0,0,0,.55) 85%); mix-blend-mode:multiply; z-index:25; }
+  #grain { position:fixed; inset:0; pointer-events:none; mix-blend-mode:overlay; opacity:.22; z-index:26; }
 </style>
 </head>
 <body>
+<div class="letterbox" id="lbTop" hidden></div>
+<div class="letterbox bottom" id="lbBottom" hidden></div>
 <div id="overlay">
   <div>
     <h1 id="title"></h1>
@@ -20,6 +32,26 @@
   </div>
   <div class="origin" id="origin"></div>
 </div>
+<div class="vignette" id="vignette" hidden></div>
+<canvas id="grain" width="0" height="0" hidden></canvas>
+<script>
+// Inline early boot marker so Node can detect compositor page even if module script stalls
+window.__COMPOSITOR_BOOT = true; console.log('[teaser] BOOT (inline html)');
+// Watchdog to ensure module script actually executes; fallback uses dynamic import (supports top-level await)
+(function(){
+  const modSrc = new URL('./compositor.js', location.href).href;
+  let done=false;
+  window.__COMPOSITOR_MODULE_WATCHDOG = setTimeout(async ()=>{
+    if (done || window.__COMPOSITOR_MAIN_STARTED) return;
+    console.warn('[teaser] module watchdog: compositor.js not executed within 1500ms, attempting dynamic import fallback');
+    try {
+      await import('./compositor.js?nocache=' + Date.now());
+      console.log('[teaser] dynamic import fallback loaded');
+    } catch(e){ console.error('[teaser] dynamic import fallback failed', e); }
+  }, 1500);
+  window.__COMPOSITOR_MODULE_LOADED = function(){ done=true; console.log('[teaser] module loaded callback'); };
+})();
+</script>
 <script type="module" src="./compositor.js"></script>
 </body>
 </html>

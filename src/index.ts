@@ -43,7 +43,7 @@ async function recordRaw(
     await page.goto(fallbackUrl, { waitUntil: 'load' });
   }
   const startTs = Date.now();
-  await runFlow(page, flow, { speed });
+  const events = await runFlow(page, flow, { speed });
   if (debug) console.log('[record] flow finished');
   // Ensure minimum extra buffer for final animations / network idle
   const elapsed = Date.now() - startTs;
@@ -92,18 +92,24 @@ async function recordRaw(
     const probeBrowser = await (playwright as any).chromium.launch({ headless: true });
     const probeCtx = await probeBrowser.newContext();
     const probePage = await probeCtx.newPage();
-    const fileUrl = 'file://' + target.replace(/\\/g,'/');
-  durationMs = await probePage.evaluate(async (src: string) => new Promise<number>((resolve) => {
+    // Build a proper file:// URL that works on Windows and POSIX (encode URI components)
+    const absNorm = target.replace(/\\/g,'/');
+    const fileUrl = 'file://' + (absNorm.startsWith('/') ? absNorm : '/' + absNorm);
+    durationMs = await probePage.evaluate(async (src: string) => new Promise<number>((resolve) => {
       const v = document.createElement('video');
       v.preload = 'metadata';
-      v.onloadedmetadata = () => resolve(Math.round(v.duration * 1000));
-      v.onerror = () => resolve(0);
+      let done = false;
+      const finish = (ms:number)=>{ if(!done){ done=true; resolve(ms); } };
+      v.onloadedmetadata = () => finish(isFinite(v.duration)? Math.round(v.duration*1000):0);
+      v.onerror = () => finish(0);
+      // Fallback timeout in case onloadedmetadata never fires
+      setTimeout(()=> finish(0), 4000);
       v.src = src;
     }), fileUrl);
     await probeBrowser.close();
     if (debug) console.log('[record] detected durationMs', durationMs);
   } catch (e) { if (debug) console.warn('[record] duration probe failed', e); }
-  return { raw: target, durationMs };
+  return { raw: target, durationMs, events };
 }
 
 async function main() {
@@ -122,7 +128,7 @@ async function main() {
 
   fs.mkdirSync(argv.out, { recursive: true });
   console.log('Recording raw flow...');
-  const { raw, durationMs } = await recordRaw('https://example.com', argv.flow, argv.out, argv.width, argv.height, argv.speed, argv.debug, argv.minDuration);
+  const { raw, durationMs, events } = await recordRaw('https://example.com', argv.flow, argv.out, argv.width, argv.height, argv.speed, argv.debug, argv.minDuration);
   console.log('Raw recording saved:', raw);
 
   // Start server to feed video file
@@ -149,6 +155,8 @@ async function main() {
     title: argv.title,
     subtitle: argv.subtitle,
     theme: argv.theme,
+    timelineBase64: Buffer.from(JSON.stringify(events)).toString('base64'),
+  debug: argv.debug,
   });
   server.close();
   console.log('Artifacts written:', { raw, composed: composedPath, cover: coverPath });

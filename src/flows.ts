@@ -12,6 +12,13 @@ export type FlowStep =
   | { action: 'sleep'; ms: number }
   | { action: 'broll'; duration: number };
 
+export interface FlowEvent {
+  t: number; // ms from start
+  type: string;
+  selector?: string;
+  x?: number; y?: number; w?: number; h?: number; // normalized viewport box
+}
+
 export interface FlowDefinition {
   name?: string;
   viewport?: { width: number; height: number };
@@ -27,12 +34,14 @@ export function loadFlow(file: string): FlowDefinition {
   return data as FlowDefinition;
 }
 
-export async function runFlow(page: Page, flow: FlowDefinition, opts: RunFlowOptions = {}) {
+export async function runFlow(page: Page, flow: FlowDefinition, opts: RunFlowOptions = {}) : Promise<FlowEvent[]> {
   const speed = opts.speed && opts.speed > 0 ? opts.speed : 1;
 
   await page.addInitScript(() => {
     (window as any).__ensureDemoOverlay = () => {
       if (document.getElementById('__demoCursor')) return;
+  // Some bundlers / transpilers may reference a helper named __name; provide a harmless stub to avoid ReferenceError in page context.
+  if (!(window as any).__name) { (window as any).__name = function(o:any){ return o; }; }
       const cursor = document.createElement('div');
       cursor.id = '__demoCursor';
       Object.assign(cursor.style, {
@@ -70,18 +79,28 @@ export async function runFlow(page: Page, flow: FlowDefinition, opts: RunFlowOpt
     return { cx, cy };
   }
 
+  // Enable per-step logging inside the page for easier diagnosis
+  const log = (...args:any[]) => console.log('[flow]', ...args);
+  const events: FlowEvent[] = [];
+  const t0 = Date.now();
+  function pushEvent(ev: Omit<FlowEvent,'t'>) { events.push({ t: Date.now()-t0, ...ev }); }
+
   for (const [i, step] of flow.steps.entries()) {
+    log('step', i, step.action, JSON.stringify(step));
     switch (step.action) {
       case 'goto':
         await page.goto(step.url, { waitUntil: 'domcontentloaded' });
         await ensureOverlay();
         await page.evaluate(() => (window as any).__demoCursorMove(window.innerWidth/2, window.innerHeight/2, 300));
+        pushEvent({ type: 'goto', selector: step.url });
         break;
       case 'click': {
         await ensureOverlay();
         const pos = await moveCursorToSelector(step.selector);
         if (pos) {
           await page.evaluate(({sel,x,y}: {sel:string;x:number;y:number}) => { const el = document.querySelector(sel); if (el) (window as any).__demoHighlight(el); (window as any).__demoClickEffect(x,y); }, { sel: step.selector, x: pos.cx, y: pos.cy });
+          const box = await page.locator(step.selector).boundingBox();
+          if (box) pushEvent({ type: 'click', selector: step.selector, x: (box.x+box.width/2)/ (await page.viewportSize()).width, y: (box.y+box.height/2)/ (await page.viewportSize()).height, w: box.width/ (await page.viewportSize()).width, h: box.height/ (await page.viewportSize()).height });
         }
         await page.click(step.selector, { delay: 40 / speed });
         await page.waitForTimeout(250 / speed);
@@ -94,28 +113,38 @@ export async function runFlow(page: Page, flow: FlowDefinition, opts: RunFlowOpt
         const delay = (step.delay ?? 70) / speed;
         await page.type(step.selector, step.text, { delay });
         await page.waitForTimeout(250 / speed);
+        const box = await page.locator(step.selector).boundingBox();
+        if (box) pushEvent({ type: 'type', selector: step.selector, x: (box.x+box.width/2)/ (await page.viewportSize()).width, y: (box.y+box.height/2)/ (await page.viewportSize()).height, w: box.width/ (await page.viewportSize()).width, h: box.height/ (await page.viewportSize()).height });
         break; }
       case 'wait':
         if (step.selector) await page.waitForSelector(step.selector); else await page.waitForTimeout((step.ms ?? 1000)/speed);
+        if (step.selector) {
+          const box = await page.locator(step.selector).boundingBox();
+          if (box) pushEvent({ type: 'wait', selector: step.selector, x: (box.x+box.width/2)/ (await page.viewportSize()).width, y: (box.y+box.height/2)/ (await page.viewportSize()).height, w: box.width/ (await page.viewportSize()).width, h: box.height/ (await page.viewportSize()).height });
+        }
         break;
       case 'scroll': {
         await ensureOverlay();
         if (step.selector) {
           await page.locator(step.selector).scrollIntoViewIfNeeded();
           await moveCursorToSelector(step.selector);
+          const box = await page.locator(step.selector).boundingBox();
+          if (box) pushEvent({ type: 'scroll', selector: step.selector, x: (box.x+box.width/2)/ (await page.viewportSize()).width, y: (box.y+box.height/2)/ (await page.viewportSize()).height, w: box.width/ (await page.viewportSize()).width, h: box.height/ (await page.viewportSize()).height });
         } else {
           const targetY = step.y ?? await page.evaluate(() => document.body.scrollHeight - window.innerHeight);
           if (step.smooth) await page.evaluate(({y,d}: {y:number;d:number})=>(window as any).__demoScrollTo(y,d), { y: targetY, d: 1000/speed });
           else await page.evaluate(({y}: {y:number})=>window.scrollTo(0,y), { y: targetY });
+          pushEvent({ type: 'scroll' });
         }
         await page.waitForTimeout(250 / speed);
         break; }
       case 'sleep':
-        await page.waitForTimeout(step.ms / speed); break;
+        await page.waitForTimeout(step.ms / speed); pushEvent({ type: 'sleep' }); break;
       case 'broll':
-        await page.waitForTimeout(step.duration / speed); break;
+        await page.waitForTimeout(step.duration / speed); pushEvent({ type: 'broll' }); break;
       default:
         throw new Error(`Unknown step action at index ${i}`);
     }
   }
+  return events;
 }
