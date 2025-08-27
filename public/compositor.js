@@ -40,7 +40,8 @@ if (window.__COMPOSITOR_RAN) {
     const videoUrl = params.get('video');
     const title = decodeURIComponent(params.get('title')||'');
     const subtitle = decodeURIComponent(params.get('subtitle')||'');
-    const theme = params.get('theme') || 'sky';
+  const theme = params.get('theme') || 'sky';
+  const showLetterbox = params.get('letterbox') !== '0';
     // (boot marker already set at top)
     let timeline = [];
     try {
@@ -167,7 +168,9 @@ if (window.__COMPOSITOR_RAN) {
     const vignette = document.getElementById('vignette');
     const grainCanvas = document.getElementById('grain');
     if (theme === 'teaser') {
-      [lbTop, lbBottom, vignette, grainCanvas].forEach(el => { if (el) el.hidden = false; });
+      [vignette, grainCanvas].forEach(el => { if (el) el.hidden = false; });
+      if (showLetterbox) [lbTop, lbBottom].forEach(el => { if (el) el.hidden = false; });
+      else [lbTop, lbBottom].forEach(el => { if (el) el && (el.hidden = true); });
     }
 
   // Disable legacy CPU grain (will use shader-based later)
@@ -210,7 +213,7 @@ if (window.__COMPOSITOR_RAN) {
     const postCam = new OrthographicCamera(-1,1,1,-1,0,1);
 
     // Focus / zoom program variables (exclude per-character jitter; include prefocus + wait)
-  const focusEvents = timeline.filter(ev=> ev.type==='click' || ev.type==='type' || ev.type==='prefocus' || ev.type==='wait');
+  const focusEvents = timeline.filter(ev=> ['click','type','prefocus','wait','press'].includes(ev.type));
     let activeFocus = null; // {t,cx,cy,zoom,bbox,w,h}
     let focusScale = 1; // actual scale factor applied (1 = no zoom)
     let focusScaleTarget = 1;
@@ -332,7 +335,8 @@ if (window.__COMPOSITOR_RAN) {
         let zBase = 1.25;
         if (ev.type === 'prefocus') zBase = 1.35;
         else if (ev.type === 'click') zBase = 1.7;
-        else if (ev.type === 'type') zBase = 1.55;
+  else if (ev.type === 'type') zBase = 1.52;
+  else if (ev.type === 'press') zBase = 1.85;
         else if (ev.type === 'wait') zBase = 1.4;
         // Derive additional zoom boost from element footprint (smaller element -> larger zoom)
         if (ev.w && ev.h) {
@@ -369,7 +373,7 @@ if (window.__COMPOSITOR_RAN) {
     function sampleCam(targetMs) {
       if (!camKeys.length) return { cx:0.5, cy:0.5, zoom:1.0, cut:false };
       // Lead-in blending: if within lead window BEFORE next key, start easing toward it.
-      const lead = 650; // ms
+  const lead = 750; // ms (slightly longer pre-ease for cleaner anticipation)
       // Find next key strictly after targetMs
       const next = camKeys.find(k => k.t > targetMs);
       if (next) {

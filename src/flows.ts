@@ -7,6 +7,7 @@ type Page = any;
 export type FlowStep =
   | { action: 'goto'; url: string; optional?: boolean }
   | { action: 'click'; selector: string; optional?: boolean }
+  | { action: 'press'; selector: string; key: string; optional?: boolean }
   | { action: 'type'; selector: string; text: string; delay?: number; optional?: boolean }
   | { action: 'wait'; ms?: number; selector?: string; optional?: boolean }
   | { action: 'scroll'; y?: number; selector?: string; smooth?: boolean; optional?: boolean }
@@ -37,6 +38,7 @@ export function loadFlow(file: string): FlowDefinition {
 
 export async function runFlow(page: Page, flow: FlowDefinition, opts: RunFlowOptions = {}) : Promise<FlowEvent[]> {
   const speed = opts.speed && opts.speed > 0 ? opts.speed : 1;
+  const SELECTOR_TIMEOUT = 10000; // prevent long 30s stalls
 
   await page.addInitScript(() => {
     (window as any).__ensureDemoOverlay = () => {
@@ -73,10 +75,14 @@ export async function runFlow(page: Page, flow: FlowDefinition, opts: RunFlowOpt
   const ensureOverlay = () => page.evaluate(() => (window as any).__ensureDemoOverlay && (window as any).__ensureDemoOverlay());
 
   async function moveCursorToSelector(selector: string) {
-    await page.waitForSelector(selector, { state: 'visible' });
-    const box = await page.locator(selector).boundingBox(); if (!box) return;
+    try {
+      await page.waitForSelector(selector, { state: 'visible', timeout: SELECTOR_TIMEOUT });
+    } catch {
+      return null;
+    }
+    const box = await page.locator(selector).boundingBox(); if (!box) return null;
     const cx = box.x + box.width/2; const cy = box.y + box.height/2;
-  await page.evaluate(({x,y}: {x:number;y:number}) => (window as any).__demoCursorMove(x, y), { x: cx, y: cy });
+    await page.evaluate(({x,y}: {x:number;y:number}) => (window as any).__demoCursorMove(x, y), { x: cx, y: cy });
     return { cx, cy };
   }
 
@@ -108,9 +114,18 @@ export async function runFlow(page: Page, flow: FlowDefinition, opts: RunFlowOpt
           await page.evaluate(({sel,x,y}: {sel:string;x:number;y:number}) => { const el = document.querySelector(sel); if (el) (window as any).__demoHighlight(el); (window as any).__demoClickEffect(x,y); }, { sel: step.selector, x: pos.cx, y: pos.cy });
           const box = await page.locator(step.selector).boundingBox();
           if (box) pushEvent({ type: 'click', selector: step.selector, x: (box.x+box.width/2)/ (await page.viewportSize()).width, y: (box.y+box.height/2)/ (await page.viewportSize()).height, w: box.width/ (await page.viewportSize()).width, h: box.height/ (await page.viewportSize()).height });
+          await page.click(step.selector, { delay: 40 / speed }).catch(()=>{});
+          await page.waitForTimeout(250 / speed);
+        } else {
+          // If selector missing and not optional, escalate unless we already navigated to a likely target page.
+          if (!(step as any).optional) {
+            const headingVisible = await page.locator('#firstHeading').first().isVisible().catch(()=>false);
+            if (!headingVisible) throw new Error('click selector not found '+step.selector);
+            log('click selector missing but heading present, skipping gracefully', step.selector);
+          } else {
+            log('optional click selector missing, skipping', step.selector);
+          }
         }
-        await page.click(step.selector, { delay: 40 / speed });
-        await page.waitForTimeout(250 / speed);
         break; }
       case 'type': {
         await ensureOverlay();
@@ -122,9 +137,10 @@ export async function runFlow(page: Page, flow: FlowDefinition, opts: RunFlowOpt
           const box = await page.locator(step.selector).boundingBox();
           if (box) pushEvent({ type: 'prefocus', selector: step.selector, x: (box.x+box.width/2)/ (await page.viewportSize()).width, y: (box.y+box.height/2)/ (await page.viewportSize()).height, w: box.width/ (await page.viewportSize()).width, h: box.height/ (await page.viewportSize()).height });
         } catch {}
-        const delay = (step.delay ?? 70) / speed;
+  const delay = (step.delay ?? 70) / speed;
+  const textToType = (step as any).text ?? '';
         // Type character by character to allow micro-event emission
-        for (const ch of step.text.split('')) {
+  for (const ch of String(textToType).split('')) {
           await page.type(step.selector, ch, { delay });
           pushEvent({ type: 'type-char', selector: step.selector });
         }
@@ -132,8 +148,28 @@ export async function runFlow(page: Page, flow: FlowDefinition, opts: RunFlowOpt
         const box = await page.locator(step.selector).boundingBox();
         if (box) pushEvent({ type: 'type', selector: step.selector, x: (box.x+box.width/2)/ (await page.viewportSize()).width, y: (box.y+box.height/2)/ (await page.viewportSize()).height, w: box.width/ (await page.viewportSize()).width, h: box.height/ (await page.viewportSize()).height });
         break; }
+      case 'press': {
+        await ensureOverlay();
+        await moveCursorToSelector(step.selector);
+        await page.focus(step.selector);
+        try {
+          const box = await page.locator(step.selector).boundingBox();
+          if (box) pushEvent({ type: 'prefocus', selector: step.selector, x: (box.x+box.width/2)/ (await page.viewportSize()).width, y: (box.y+box.height/2)/ (await page.viewportSize()).height, w: box.width/ (await page.viewportSize()).width, h: box.height/ (await page.viewportSize()).height });
+        } catch {}
+        await page.keyboard.press(step.key);
+        try {
+          const box = await page.locator(step.selector).boundingBox();
+          if (box) pushEvent({ type: 'press', selector: step.selector, x: (box.x+box.width/2)/ (await page.viewportSize()).width, y: (box.y+box.height/2)/ (await page.viewportSize()).height, w: box.width/ (await page.viewportSize()).width, h: box.height/ (await page.viewportSize()).height });
+        } catch {}
+        await page.waitForTimeout(200 / speed);
+        break; }
       case 'wait':
-        if (step.selector) await page.waitForSelector(step.selector); else await page.waitForTimeout((step.ms ?? 1000)/speed);
+        if (step.selector) {
+          const ok = await page.waitForSelector(step.selector, { timeout: SELECTOR_TIMEOUT }).then(()=>true).catch(()=>false);
+          if (!ok) { if ((step as any).optional) { log('optional wait timeout', step.selector); break; } else throw new Error('wait selector timeout '+step.selector); }
+        } else {
+          await page.waitForTimeout((step.ms ?? 1000)/speed);
+        }
         if (step.selector) {
           const box = await page.locator(step.selector).boundingBox();
           if (box) pushEvent({ type: 'wait', selector: step.selector, x: (box.x+box.width/2)/ (await page.viewportSize()).width, y: (box.y+box.height/2)/ (await page.viewportSize()).height, w: box.width/ (await page.viewportSize()).width, h: box.height/ (await page.viewportSize()).height });

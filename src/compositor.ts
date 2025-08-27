@@ -23,6 +23,7 @@ export interface ComposeOptions {
   fps?: number; // capture FPS
   quality?: string; // quality preset for compositor
   link?: string; // CTA / external URL
+  letterbox?: boolean; // whether to show cinematic black bars
 }
 
 export async function compose(options: ComposeOptions) {
@@ -43,7 +44,7 @@ export async function compose(options: ComposeOptions) {
   try { const u = new URL(options.videoUrl); origin = `${u.protocol}//${u.host}`; } catch {}
   const debug = options.debug ? '&debug=1' : '';
   const effBitrate = options.videoBitrateKbps || options.bitrateKbps || '';
-  const extra = `&bitrate=${encodeURIComponent(String(effBitrate))}&link=${encodeURIComponent(options.link||'')}&fps=${encodeURIComponent(String(options.fps||''))}&quality=${encodeURIComponent(options.quality||'')}`;
+  const extra = `&bitrate=${encodeURIComponent(String(effBitrate))}&link=${encodeURIComponent(options.link||'')}&fps=${encodeURIComponent(String(options.fps||''))}&quality=${encodeURIComponent(options.quality||'')}&letterbox=${options.letterbox===false?'0':'1'}`;
   const url = origin + `/compositor?video=${encodeURIComponent(options.videoUrl)}&title=${encodeURIComponent(options.title ?? '')}&subtitle=${encodeURIComponent(options.subtitle ?? '')}&theme=${encodeURIComponent(options.theme ?? 'sky')}&timeline=${encodeURIComponent(options.timelineBase64 ?? '')}&fallbackDuration=${encodeURIComponent(String(options.duration || 0))}${extra}${debug}`;
   console.log('[compose] navigate URL', url);
   // Expose nodeDone BEFORE navigation so page scripts can call immediately

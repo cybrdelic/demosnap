@@ -26,6 +26,7 @@ interface CLIArgs {
   fps: number;
   quality: string;
   link?: string;
+  noLetterbox: boolean;
 }
 
 async function recordRaw(
@@ -114,6 +115,7 @@ async function main() {
   .option('fps', { type: 'number', default: 30, describe: 'Capture FPS (e.g. 30, 45, 60). Higher = smoother + larger file.' })
   .option('quality', { type: 'string', default: 'auto', choices: ['auto','high','max'], describe: 'Compositor quality preset (dynamic scale, high, or locked max)' })
   .option('link', { type: 'string', describe: 'Product / CTA URL to embed & log' })
+  .option('noLetterbox', { type: 'boolean', default: false, describe: 'Disable cinematic letterbox bars' })
     .parseSync() as unknown as CLIArgs;
 
   // Auto-enable serve if a link / CTA provided (so user can open player after run)
@@ -156,6 +158,7 @@ async function main() {
   fps: argv.fps,
   quality: argv.quality,
   link: argv.link,
+  letterbox: !argv.noLetterbox,
   });
   // Add composed route before optionally serving
   (app as any).get && (app as any).get('/composed', (_req:any,res:any)=> res.sendFile(composedPath, (err:any)=>{ if(err){ console.error('[serve] /composed sendFile error', err); res.status(500).end(); } }));

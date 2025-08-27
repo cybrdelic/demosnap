@@ -12,7 +12,10 @@ steps:
   - action: type
     selector: input[name="search"]
     text: Three.js
-    delay: 90
+  # Press Enter instead of clicking button for cleaner UI action
+  - action: press
+    selector: input[name="search"]
+    key: Enter
   # Brief wait on suggestions list to capture dropdown for camera focus (prefocus & wait event)
   - action: wait
     selector: .suggestions-dropdown
