@@ -15,9 +15,14 @@ const sharpBtn = qs('#sharpBtn');
 const resetBtn = qs('#resetBtn');
 const statsBox = qs('#stats');
 const qualityBadge = qs('#qualityBadge');
+const sharpStrength = qs('#sharpStrength');
+const contrastSlider = qs('#contrast');
+const gammaSlider = qs('#gamma');
+const toggleStatsBtn = qs('#toggleStats');
 
 // Optional sharpening via offscreen canvas
 let sharpenEnabled = false;
+let showStats = false;
 let procCanvas = document.createElement('canvas');
 let procCtx = procCanvas.getContext('2d');
 let lastFrameTime = performance.now();
@@ -67,29 +72,29 @@ dlBtn?.addEventListener('click', ()=>{ if (!vid.src) return; const a=document.cr
 sharpBtn?.addEventListener('click', ()=>{ sharpenEnabled=!sharpenEnabled; sharpBtn.textContent = sharpenEnabled? 'Sharp-':'Sharp+'; if(sharpenEnabled){ enableProcessing(); } else { disableProcessing(); }});
 resetBtn?.addEventListener('click', ()=>{ sharpenEnabled=false; sharpBtn.textContent='Sharp+'; disableProcessing(); vid.playbackRate=1; speedBtn.textContent='1.00x'; vid.currentTime=0; });
 
-function enableProcessing(){ if(vid.crossOrigin!=="anonymous") vid.crossOrigin='anonymous'; if(!procCanvas.parentNode){ procCanvas.style.position='absolute'; procCanvas.style.inset='0'; procCanvas.style.width='100%'; procCanvas.style.height='100%'; procCanvas.style.mixBlendMode='normal'; vid.after(procCanvas); vid.style.visibility='hidden'; }
-  procCanvas.width = vid.videoWidth; procCanvas.height = vid.videoHeight;
-}
+function enableProcessing(){ if(vid.crossOrigin!=="anonymous") vid.crossOrigin='anonymous'; if(!procCanvas.parentNode){ procCanvas.className='renderLayer'; procCanvas.style.position='absolute'; procCanvas.style.inset='0'; procCanvas.style.width='100%'; procCanvas.style.height='100%'; procCanvas.style.mixBlendMode='normal'; vid.after(procCanvas); vid.style.visibility='hidden'; }
+  procCanvas.width = vid.videoWidth; procCanvas.height = vid.videoHeight; }
 function disableProcessing(){ if(procCanvas.parentNode){ procCanvas.remove(); vid.style.visibility=''; } }
 
-function processFrame(){ if(!sharpenEnabled) return; if(vid.readyState<2) return; procCanvas.width = vid.videoWidth; procCanvas.height = vid.videoHeight; procCtx.drawImage(vid,0,0); const img=procCtx.getImageData(0,0,procCanvas.width,procCanvas.height); const d=img.data; // simple unsharp
-  // 1-pass horizontal blur into temp
-  const w=procCanvas.width,h=procCanvas.height; const tmp=new Uint8ClampedArray(d.length);
-  for(let y=0;y<h;y++){ for(let x=0;x<w;x++){ const i=(y*w+x)*4; let r=0,g=0,b=0,cnt=0; for(let dx=-1;dx<=1;dx++){ const xx=Math.min(w-1,Math.max(0,x+dx)); const ii=(y*w+xx)*4; r+=d[ii];g+=d[ii+1];b+=d[ii+2];cnt++; } tmp[i]=r/cnt; tmp[i+1]=g/cnt; tmp[i+2]=b/cnt; tmp[i+3]=255; }}
-  // sharpen
-  for(let y=0;y<h;y++){ for(let x=0;x<w;x++){ const i=(y*w+x)*4; const r=d[i],g=d[i+1],b=d[i+2]; const br=tmp[i],bg=tmp[i+1],bb=tmp[i+2]; const amt=0.55; d[i]=Math.min(255,Math.max(0,r+(r-br)*amt)); d[i+1]=Math.min(255,Math.max(0,g+(g-bg)*amt)); d[i+2]=Math.min(255,Math.max(0,b+(b-bb)*amt)); }}
-  procCtx.putImageData(img,0,0);
-}
+function processFrame(){ if(!sharpenEnabled) return; if(vid.readyState<2) return; const w=vid.videoWidth,h=vid.videoHeight; if(w===0||h===0) return; if(procCanvas.width!==w) procCanvas.width=w; if(procCanvas.height!==h) procCanvas.height=h; procCtx.drawImage(vid,0,0,w,h); const img=procCtx.getImageData(0,0,w,h); const d=img.data; const tmp=new Uint8ClampedArray(d.length); const tmp2=new Uint8ClampedArray(d.length); // two-pass sep blur 3-tap
+  for(let y=0;y<h;y++){ const row=y*w; for(let x=0;x<w;x++){ const i=(row+x)*4; let r=0,g=0,b=0,c=0; for(let dx=-1;dx<=1;dx++){ const xx=Math.min(w-1,Math.max(0,x+dx)); const ii=(row+xx)*4; r+=d[ii];g+=d[ii+1];b+=d[ii+2];c++; } tmp[i]=r/c; tmp[i+1]=g/c; tmp[i+2]=b/c; tmp[i+3]=255; }}
+  for(let y=0;y<h;y++){ for(let x=0;x<w;x++){ const i=(y*w+x)*4; let r=0,g=0,b=0,c=0; for(let dy=-1;dy<=1;dy++){ const yy=Math.min(h-1,Math.max(0,y+dy)); const ii=(yy*w+x)*4; r+=tmp[ii];g+=tmp[ii+1];b+=tmp[ii+2];c++; } tmp2[i]=r/c; tmp2[i+1]=g/c; tmp2[i+2]=b/c; tmp2[i+3]=255; }}
+  const sharpAmt = parseFloat(sharpStrength?.value||'0.55'); const contrast = parseFloat(contrastSlider?.value||'1'); const gamma = parseFloat(gammaSlider?.value||'1');
+  for(let i=0;i<d.length;i+=4){ const r=d[i],g=d[i+1],b=d[i+2]; const br=tmp2[i],bg=tmp2[i+1],bb=tmp2[i+2]; let nr=r+(r-br)*sharpAmt; let ng=g+(g-bg)*sharpAmt; let nb=b+(b-bb)*sharpAmt; // contrast
+    nr=((nr-128)*contrast+128); ng=((ng-128)*contrast+128); nb=((nb-128)*contrast+128); // gamma
+    nr=255*Math.pow(Math.min(1,Math.max(0,nr/255)),1/gamma); ng=255*Math.pow(Math.min(1,Math.max(0,ng/255)),1/gamma); nb=255*Math.pow(Math.min(1,Math.max(0,nb/255)),1/gamma);
+    d[i]=nr; d[i+1]=ng; d[i+2]=nb; }
+  procCtx.putImageData(img,0,0); }
 
 function rafLoop(){ requestAnimationFrame(rafLoop); const now=performance.now(); const dt=now-lastFrameTime; if(dt<14) { return; } lastFrameTime=now; frameCounter++; fpsTimer+=dt; if(fpsTimer>1000){ fps=frameCounter; frameCounter=0; fpsTimer=0; updateStats(); }
   processFrame();
 }
 rafLoop();
 
-function updateStats(){ if(!statsBox) return; statsBox.textContent=`FPS ${fps}\nScale 1x\nSharp ${sharpenEnabled?'on':'off'}`; }
+function updateStats(){ if(!statsBox||!showStats) return; statsBox.textContent=`FPS ${fps}\nScale 1x\nSharp ${sharpenEnabled?'on':'off'} ${(sharpStrength?.value)||''}\nC ${(contrastSlider?.value)||''} G ${(gammaSlider?.value)||''}`; }
 
 // Auto quality (placeholder: could choose among multiple source qualities). For now mark as AUTO/Hi.
-if (qualityBadge) qualityBadge.textContent = 'HI';
+if (qualityBadge) qualityBadge.textContent = 'HI+';
 
 // Keyboard shortcuts
 window.addEventListener('keydown', (e)=>{
@@ -107,3 +112,8 @@ window.addEventListener('keydown', (e)=>{
 
 // Expose for debugging
 window.player = { setSource, enableProcessing, disableProcessing };
+
+toggleStatsBtn?.addEventListener('click', ()=>{ showStats=!showStats; statsBox?.classList.toggle('hidden', !showStats); if(showStats) updateStats(); });
+sharpStrength?.addEventListener('input', ()=> updateStats());
+contrastSlider?.addEventListener('input', ()=> updateStats());
+gammaSlider?.addEventListener('input', ()=> updateStats());

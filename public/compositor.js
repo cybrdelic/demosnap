@@ -210,7 +210,7 @@ if (window.__COMPOSITOR_RAN) {
     const postCam = new OrthographicCamera(-1,1,1,-1,0,1);
 
     // Focus / zoom program variables
-    const focusEvents = timeline.filter(ev=> ev.type==='click' || ev.type==='type');
+  const focusEvents = timeline.filter(ev=> ev.type==='click' || ev.type==='type' || ev.type==='type-char');
     let activeFocus = null; // {t,cx,cy,zoom,bbox,w,h}
     let focusScale = 1; // actual scale factor applied (1 = no zoom)
     let focusScaleTarget = 1;
@@ -405,16 +405,24 @@ if (window.__COMPOSITOR_RAN) {
           const desired = 0.82;
           const sw = desired / Math.max(0.001, upcoming.w);
           const sh = desired / Math.max(0.001, upcoming.h);
-          const target = Math.min(Math.max(sw, sh), 3.2); // clamp max zoom
+          const target = Math.min(Math.max(sw, sh), 3.8); // increased clamp for deeper cinematic push
           focusScaleTarget = target;
         } else {
-          focusScaleTarget = upcoming.type === 'type' ? 1.9 : 1.5;
+          // Fallback heuristic zoom targets (stronger emphasis on typing / clicks)
+          focusScaleTarget = upcoming.type === 'type' ? 2.2 : 1.65;
         }
       }
       if (activeFocus && relMs - activeFocus.t > 1200) { // fade ring after some time
         updateFocusRing(null); activeFocus = null; focusScaleTarget = 1; }
       // Fast ease toward target (very snappy => higher smoothing factor)
-      focusScale += (focusScaleTarget - focusScale) * 0.38;
+  // Slightly snappier interpolation toward target
+      focusScale += (focusScaleTarget - focusScale) * 0.46;
+      // Micro pulses for rapid type-char events (recent within 140ms)
+      const recentChar = timeline.slice(-12).reverse().find(ev=> ev.type==='type-char' && (relMs - ev.t) < 140);
+      if (recentChar) {
+        const pulse = 1 + Math.min(0.06, (140-(relMs-recentChar.t))/140 * 0.06);
+        focusScale *= pulse;
+      }
       if (Math.abs(focusScale - 1) < 0.002) focusScale = 1;
 
   if (theme === 'teaser') {
@@ -468,7 +476,7 @@ if (window.__COMPOSITOR_RAN) {
   }
   // Simulate quick “cut” flash by brief exposure tweak
   if (focus.cut) {
-  renderer.toneMappingExposure = 1.35;
+  renderer.toneMappingExposure = 1.5;
   } else {
     renderer.toneMappingExposure += (1 - renderer.toneMappingExposure)*0.08;
   }

@@ -6,28 +6,34 @@
 <title>DemoSnap Player</title>
 <style>
   :root { color-scheme: dark; }
-  body { margin:0; font-family: system-ui, sans-serif; background:#020617; color:#e2e8f0; overflow:hidden; }
+  body { margin:0; font-family: system-ui, Inter, Segoe UI, sans-serif; background:linear-gradient(145deg,#020617,#0a1327); color:#e2e8f0; overflow:hidden; }
   #app { position:fixed; inset:0; display:flex; flex-direction:column; }
-  header { display:flex; align-items:center; gap:.8rem; padding:.6rem .9rem; background:rgba(10,18,43,.75); -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px); border-bottom:1px solid rgba(255,255,255,.08); }
+  header { display:flex; align-items:center; gap:.8rem; padding:.55rem .95rem; background:rgba(12,20,42,.65); -webkit-backdrop-filter:blur(18px) saturate(160%); backdrop-filter:blur(18px) saturate(160%); border-bottom:1px solid rgba(255,255,255,.07); }
   header h1 { font-size:1rem; margin:0; font-weight:500; letter-spacing:.04em; }
   main { flex:1; position:relative; display:flex; align-items:center; justify-content:center; background:radial-gradient(circle at 50% 45%, #0f1e3b, #030712 70%); }
-  .stage { position:relative; width:min(100vw, 178vh); aspect-ratio:16/9; display:flex; align-items:center; justify-content:center; }
-  video { width:100%; height:100%; object-fit:cover; border-radius:12px; box-shadow:0 8px 32px -6px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.06); background:#000; }
+  .stage { position:relative; width:min(100vw, 178vh); aspect-ratio:16/9; display:flex; align-items:center; justify-content:center; --glow: 0 12px 48px -18px rgba(0,0,0,.8), 0 2px 12px -4px rgba(0,0,0,.5); }
+  video, canvas.renderLayer { width:100%; height:100%; object-fit:cover; border-radius:18px; box-shadow:var(--glow), 0 0 0 1px rgba(255,255,255,.065); background:#000; }
   .hud { position:absolute; inset:0; pointer-events:none; display:flex; flex-direction:column; justify-content:space-between; }
   .gradientTop, .gradientBottom { height:130px; width:100%; pointer-events:none; }
   .gradientTop { background:linear-gradient(to bottom, rgba(0,0,0,.65), rgba(0,0,0,0)); border-top-left-radius:12px; border-top-right-radius:12px; }
   .gradientBottom { background:linear-gradient(to top, rgba(0,0,0,.75), rgba(0,0,0,0)); border-bottom-left-radius:12px; border-bottom-right-radius:12px; }
-  .controls { position:absolute; left:0; bottom:0; width:100%; padding:.65rem .9rem 1rem; box-sizing:border-box; display:flex; flex-direction:column; gap:.55rem; pointer-events:auto; }
+  .controls { position:absolute; left:0; bottom:0; width:100%; padding:.65rem .95rem 1.05rem; box-sizing:border-box; display:flex; flex-direction:column; gap:.55rem; pointer-events:auto; }
   .row { display:flex; align-items:center; gap:.8rem; }
-  button { background:#1e293b; border:1px solid #334155; color:#e2e8f0; font:inherit; padding:.45rem .9rem; border-radius:8px; cursor:pointer; display:inline-flex; align-items:center; gap:.4rem; line-height:1; transition:background .2s,border-color .2s; }
-  button:hover { background:#334155; }
-  button.primary { background:#2563eb; border-color:#1d4ed8; }
-  button.primary:hover { background:#1d4ed8; }
+  button { background:linear-gradient(180deg,#1e293b,#182335); border:1px solid #2c3b52; color:#e2e8f0; font:inherit; padding:.48rem .95rem; border-radius:9px; cursor:pointer; display:inline-flex; align-items:center; gap:.4rem; line-height:1; transition:background .25s,border-color .25s,transform .18s; position:relative; overflow:hidden; }
+  button:hover { background:linear-gradient(180deg,#2a3a52,#1d2b42); }
+  button:active { transform:translateY(1px); }
+  button.primary { background:linear-gradient(180deg,#2563eb,#1d4ed8); border-color:#1d4ed8; }
+  button.primary:hover { background:linear-gradient(180deg,#1d4ed8,#1e40af); }
   .time { font-variant-numeric:tabular-nums; font-size:.8rem; opacity:.85; min-width:110px; }
-  input[type=range] { flex:1; accent-color:#2563eb; cursor:pointer; }
+  input[type=range] { flex:1; accent-color:#2563eb; cursor:pointer; height:4px; }
   .spacer { flex:1; }
   .badge { font-size:.65rem; padding:.25rem .5rem; border-radius:6px; background:#0f172a; border:1px solid #1e293b; letter-spacing:.06em; text-transform:uppercase; opacity:.8; }
-  .stats { position:absolute; top:.5rem; right:.75rem; font-size:.65rem; background:rgba(0,0,0,.55); padding:.4rem .55rem; border-radius:6px; line-height:1.3; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; pointer-events:none; opacity:.85; }
+  .stats { position:absolute; top:.55rem; right:.75rem; font-size:.65rem; background:rgba(0,0,0,.55); padding:.45rem .6rem; border-radius:8px; line-height:1.3; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; pointer-events:none; opacity:.9; box-shadow:0 4px 18px -6px rgba(0,0,0,.5); }
+  .groupLabel { font-size:.62rem; letter-spacing:.1em; opacity:.6; }
+  .mini { font-size:.6rem; opacity:.75; }
+  .sliderRow { display:flex; align-items:center; gap:.6rem; width:100%; }
+  #sharpStrength { width:140px; }
+  #toggleStats { position:absolute; top:.55rem; left:.75rem; background:rgba(0,0,0,.45); border:1px solid rgba(255,255,255,.08); font-size:.6rem; padding:.35rem .6rem; }
   .hidden { display:none!important; }
 </style>
 </head>
@@ -58,13 +64,19 @@
           <div class="row">
             <input id="volume" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume" title="Volume" />
             <div class="spacer"></div>
-            <button id="sharpBtn">Sharp+</button>
+            <div class="sliderRow">
+              <button id="sharpBtn">Sharp+</button>
+              <input id="sharpStrength" type="range" min="0" max="1" step="0.01" value="0.55" title="Sharpness" />
+              <input id="contrast" type="range" min="0.8" max="1.3" step="0.01" value="1" title="Contrast" />
+              <input id="gamma" type="range" min="0.85" max="1.25" step="0.01" value="1" title="Gamma" />
+            </div>
             <button id="resetBtn">Reset</button>
           </div>
         </div>
         <div class="gradientBottom"></div>
       </div>
       <div class="stats hidden" id="stats"></div>
+      <button id="toggleStats">Stats</button>
     </div>
   </main>
 </div>

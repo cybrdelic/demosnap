@@ -111,7 +111,11 @@ export async function runFlow(page: Page, flow: FlowDefinition, opts: RunFlowOpt
         await page.click(step.selector, { delay: 40 / speed });
         await page.fill(step.selector, '');
         const delay = (step.delay ?? 70) / speed;
-        await page.type(step.selector, step.text, { delay });
+        // Type character by character to allow micro-event emission
+        for (const ch of step.text.split('')) {
+          await page.type(step.selector, ch, { delay });
+          pushEvent({ type: 'type-char', selector: step.selector });
+        }
         await page.waitForTimeout(250 / speed);
         const box = await page.locator(step.selector).boundingBox();
         if (box) pushEvent({ type: 'type', selector: step.selector, x: (box.x+box.width/2)/ (await page.viewportSize()).width, y: (box.y+box.height/2)/ (await page.viewportSize()).height, w: box.width/ (await page.viewportSize()).width, h: box.height/ (await page.viewportSize()).height });

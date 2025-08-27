@@ -131,8 +131,9 @@ async function main() {
   const port = (server.address() as any).port;
   const videoUrl = `http://localhost:${port}/video`;
 
-  const composedPath = path.join(argv.out, 'composed.webm');
-  const coverPath = path.join(argv.out, 'cover.png');
+  // Use absolute resolved paths so express sendFile works reliably on Windows
+  const composedPath = path.resolve(argv.out, 'composed.webm');
+  const coverPath = path.resolve(argv.out, 'cover.png');
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = path.dirname(__filename);
   const htmlPath = path.join(__dirname, '..', 'public', 'compositor.html');
@@ -157,7 +158,7 @@ async function main() {
   link: argv.link,
   });
   // Add composed route before optionally serving
-  (app as any).get && (app as any).get('/composed', (_req:any,res:any)=> res.sendFile(composedPath));
+  (app as any).get && (app as any).get('/composed', (_req:any,res:any)=> res.sendFile(composedPath, (err:any)=>{ if(err){ console.error('[serve] /composed sendFile error', err); res.status(500).end(); } }));
   console.log('Artifacts written:', { raw, composed: composedPath, cover: coverPath });
   const playerComposed = `http://localhost:${port}/player?src=${encodeURIComponent(`http://localhost:${port}/composed`)}${argv.link?`&cta=${encodeURIComponent(argv.link)}`:''}`;
   console.log('[player] Local player (composed):', playerComposed);
