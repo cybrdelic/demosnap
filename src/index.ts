@@ -86,29 +86,9 @@ async function recordRaw(
   const stat = fs.statSync(target);
   if (stat.size === 0) throw new Error('Recorded video is empty after flush');
   if (debug) console.log('[record] raw size', stat.size);
-  // Compute duration via a quick browser probe (html5 video metadata) if possible
-  let durationMs = 0;
-  try {
-    const probeBrowser = await (playwright as any).chromium.launch({ headless: true });
-    const probeCtx = await probeBrowser.newContext();
-    const probePage = await probeCtx.newPage();
-    // Build a proper file:// URL that works on Windows and POSIX (encode URI components)
-    const absNorm = target.replace(/\\/g,'/');
-    const fileUrl = 'file://' + (absNorm.startsWith('/') ? absNorm : '/' + absNorm);
-    durationMs = await probePage.evaluate(async (src: string) => new Promise<number>((resolve) => {
-      const v = document.createElement('video');
-      v.preload = 'metadata';
-      let done = false;
-      const finish = (ms:number)=>{ if(!done){ done=true; resolve(ms); } };
-      v.onloadedmetadata = () => finish(isFinite(v.duration)? Math.round(v.duration*1000):0);
-      v.onerror = () => finish(0);
-      // Fallback timeout in case onloadedmetadata never fires
-      setTimeout(()=> finish(0), 4000);
-      v.src = src;
-    }), fileUrl);
-    await probeBrowser.close();
-    if (debug) console.log('[record] detected durationMs', durationMs);
-  } catch (e) { if (debug) console.warn('[record] duration probe failed', e); }
+  // Optional duration probe removed for Windows reliability; compositor will use video.duration directly.
+  const durationMs = 0; // 0 => let compositor fallback logic decide
+  if (debug) console.log('[record] skipping duration probe (set to 0; compositor will infer)');
   return { raw: target, durationMs, events };
 }
 
@@ -151,7 +131,8 @@ async function main() {
     coverPath,
     width: argv.width,
     height: argv.height,
-  duration: durationMs ? durationMs + 1500 : 8000, // add a little tail for camera motion
+  // If durationMs==0 compositor will rely on video metadata; provide generous fallback min
+  duration: durationMs ? durationMs + 1500 : Math.max(argv.minDuration, 8000),
     title: argv.title,
     subtitle: argv.subtitle,
     theme: argv.theme,

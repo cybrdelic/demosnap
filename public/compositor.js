@@ -1,52 +1,37 @@
-// Signal boot immediately so host can detect page script execution even before Three loads
+import {
+  AmbientLight,
+  BackSide,
+  Color,
+  DirectionalLight,
+  Fog,
+  GridHelper,
+  Group,
+  LinearFilter,
+  Mesh,
+  MeshBasicMaterial,
+  MeshStandardMaterial,
+  OrthographicCamera,
+  PerspectiveCamera,
+  PlaneGeometry,
+  Scene,
+  ShaderMaterial,
+  SphereGeometry,
+  Vector2,
+  VideoTexture,
+  WebGLRenderer,
+  WebGLRenderTarget
+} from '/vendor/three/three.module.js';
+
+// Signal boot immediately so host can detect page script execution.
 window.__COMPOSITOR_BOOT = true; window.__COMPOSITOR_MAIN_STARTED = true; console.log('[teaser] BOOT (early)');
 try { if (window.__COMPOSITOR_MODULE_LOADED) window.__COMPOSITOR_MODULE_LOADED(); } catch {}
 
-// Guard against duplicate loads (e.g. watchdog dynamic import fallback)
 if (window.__COMPOSITOR_RAN) {
   console.log('[teaser] duplicate compositor.js load ignored');
-  // If first run failed to ever signal readiness, offer a minimal signal now.
   if (!window.COMPOSITOR_READY) { console.warn('[teaser] duplicate load providing readiness fallback'); /* @ts-ignore */ window.COMPOSITOR_READY = true; }
 } else {
   window.__COMPOSITOR_RAN = true;
-
-  // Dynamic import of Three.js via CDN because we serve raw modules without bundling.
-  let THREE = null; // will hold module namespace exports
-  async function loadThree(){
-    // Try local served version first
-    try {
-      const threeModule = await import('/vendor/three/three.module.js');
-      // Three.js module exports individual classes, so we reconstruct a THREE object
-      THREE = threeModule;
-      console.log('[teaser] three loaded (local)', Object.keys(THREE).length, 'exports');
-    } catch(e){ console.warn('[teaser] local three load failed, falling back to CDN', e); }
-    if(!THREE) {
-      try {
-        const threeModule = await import('https://unpkg.com/three@0.166.0/build/three.module.js');
-        THREE = threeModule;
-        console.log('[teaser] three loaded (cdn)', Object.keys(THREE).length, 'exports');
-      } catch(e) {
-        console.error('[teaser] failed to load three from CDN', e);
-        // @ts-ignore
-        window.COMPOSITOR_READY = true;
-      }
-    }
-    return THREE;
-  }
-  await loadThree();
-  if(!THREE){
-    console.error('[teaser] Three.js unavailable; aborting scene setup');
-    // Provide minimal ready signal to unblock compose
-    // @ts-ignore
-    window.COMPOSITOR_READY = true;
-  } else {
-    // Destructure frequently used exports so we can minify references and avoid relying on a global symbol
-    const {
-      Scene, Color, Fog, PerspectiveCamera, WebGLRenderer,
-      AmbientLight, DirectionalLight, SphereGeometry, MeshBasicMaterial,
-      Mesh, GridHelper, VideoTexture, LinearFilter, PlaneGeometry,
-      MeshStandardMaterial, Group,
-    } = THREE;
+  // --- Scene + cinematic pipeline ---
 
     // --- Original scene setup & recording logic now inside duplicate-load guard ---
     const params = new URLSearchParams(location.search);
@@ -89,7 +74,7 @@ if (window.__COMPOSITOR_RAN) {
     // Environment / theme specifics
     if (theme === 'sky' || theme === 'teaser') {
   const skyGeo = new SphereGeometry(160, 42, 18);
-  const skyMat = new MeshBasicMaterial({ color: theme === 'teaser' ? 0x0d132b : 0x1e2958, side: THREE.BackSide });
+  const skyMat = new MeshBasicMaterial({ color: theme === 'teaser' ? 0x0d132b : 0x1e2958, side: BackSide });
   const sky = new Mesh(skyGeo, skyMat);
       scene.add(sky);
     }
@@ -178,6 +163,55 @@ if (window.__COMPOSITOR_RAN) {
     let hardStopTimer = null;
     let plannedStopTimer = null;
     let readySignalled = false;
+    // Cinematic focus helpers (ring)
+    const focusRing = document.getElementById('focusRing');
+    // Post-process edge-lift shader pass (replaces CPU edge canvas)
+    const edgeCanvasEl = document.getElementById('edgeLift');
+    if (edgeCanvasEl) edgeCanvasEl.hidden = true; // legacy canvas no longer used
+
+    // Render target for base scene & post FX quad
+    const rt = new WebGLRenderTarget(window.innerWidth, window.innerHeight, { depthBuffer: true });
+    const edgeFrag = `precision highp float;\nuniform sampler2D uBase; uniform vec2 uTexel; uniform float uEdge; uniform float uLift; uniform float uBorder; varying vec2 vUv; float luma(vec3 c){ return dot(c, vec3(0.299,0.587,0.114)); } void main(){ vec2 t = uTexel; float tl=luma(texture2D(uBase,vUv+vec2(-t.x,-t.y)).rgb); float l =luma(texture2D(uBase,vUv+vec2(-t.x,0.)).rgb); float bl=luma(texture2D(uBase,vUv+vec2(-t.x,t.y)).rgb); float t0=luma(texture2D(uBase,vUv+vec2(0.,-t.y)).rgb); float c =luma(texture2D(uBase,vUv).rgb); float b =luma(texture2D(uBase,vUv+vec2(0.,t.y)).rgb); float tr=luma(texture2D(uBase,vUv+vec2(t.x,-t.y)).rgb); float r =luma(texture2D(uBase,vUv+vec2(t.x,0.)).rgb); float br=luma(texture2D(uBase,vUv+vec2(t.x,t.y)).rgb); float gx=(tr+2.0*r+br)-(tl+2.0*l+bl); float gy=(bl+2.0*b+br)-(tl+2.0*t0+tr); float edge=clamp(sqrt(gx*gx+gy*gy)*uEdge,0.,1.); vec2 d = abs(vUv-0.5)*2.; float border = pow(max(d.x,d.y),1.5); float lift = uLift * mix(1., border, uBorder); vec3 base = texture2D(uBase,vUv).rgb; vec3 lifted = base + edge*lift; gl_FragColor = vec4(lifted,1.); }`;
+    const edgeVert = `varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position,1.); }`;
+    const edgeMat = new ShaderMaterial({
+      uniforms: {
+        uBase: { value: rt.texture },
+        uTexel: { value: new Vector2(1/ window.innerWidth, 1/ window.innerHeight) },
+        uEdge: { value: 1.0 },
+        uLift: { value: 0.18 },
+        uBorder: { value: 0.6 },
+      },
+      vertexShader: edgeVert,
+      fragmentShader: edgeFrag,
+    });
+    const quadGeo = new PlaneGeometry(2,2);
+    const quad = new Mesh(quadGeo, edgeMat);
+    const postScene = new Scene();
+    postScene.add(quad);
+    const postCam = new OrthographicCamera(-1,1,1,-1,0,1);
+
+    // Focus / zoom program variables
+    const focusEvents = timeline.filter(ev=> ev.type==='click' || ev.type==='type');
+    let activeFocus = null; // {t,cx,cy,zoom,bbox,w,h}
+    let focusScale = 1; // actual scale factor applied (1 = no zoom)
+    let focusScaleTarget = 1;
+    const focusLookAhead = 420; // ms before event to start move
+    function findUpcomingFocus(ms){
+      for (const ev of focusEvents){
+        if (ms <= ev.t && ev.t - ms < 1600) return ev; // first upcoming within horizon
+      }
+      return null;
+    }
+    function updateFocusRing(bbox){
+      if(!(focusRing instanceof HTMLElement) || !bbox){ focusRing && (focusRing.style.opacity='0'); return; }
+      const pad = 6;
+      focusRing.style.left = (bbox.x - pad) + 'px';
+      focusRing.style.top = (bbox.y - pad) + 'px';
+      focusRing.style.width = (bbox.width + pad*2) + 'px';
+      focusRing.style.height = (bbox.height + pad*2) + 'px';
+      focusRing.style.opacity = '1';
+      focusRing.style.transform = 'translateZ(0) scale(1)';
+    }
 
     function signalReadyOnce(){
       if(readySignalled) { dbg('signalReadyOnce already signalled'); return; }
@@ -306,21 +340,64 @@ if (window.__COMPOSITOR_RAN) {
   const fx = (focus.cx - 0.5) * 16; // map to plane local coords width 16
   const fy = (0.5 - focus.cy) * 9;  // invert y
 
+      // Determine upcoming DOM focus target (approx using recorded selector positions)
+      const relMs = (t - startTime);
+      const upcoming = findUpcomingFocus(relMs + focusLookAhead);
+      if (upcoming && (!activeFocus || upcoming.t !== activeFocus.t)) {
+        // Try to resolve selector in live compositor page (may fail; guard)
+        let bbox = null;
+        try {
+          if (upcoming.selector) {
+            const el = document.querySelector(upcoming.selector);
+            if (el) {
+              const r = el.getBoundingClientRect();
+              bbox = { x: r.x, y: r.y, width: r.width, height: r.height };
+            }
+          }
+        } catch{}
+        activeFocus = { t: upcoming.t, bbox, w: upcoming.w, h: upcoming.h };
+        if (bbox) updateFocusRing(bbox); else updateFocusRing(null);
+        // Derive desired scale so ROI covers ~82% of viewport (fast ramp)
+        if (upcoming.w && upcoming.h) {
+          const desired = 0.82;
+          const sw = desired / Math.max(0.001, upcoming.w);
+          const sh = desired / Math.max(0.001, upcoming.h);
+          const target = Math.min(Math.max(sw, sh), 3.2); // clamp max zoom
+          focusScaleTarget = target;
+        } else {
+          focusScaleTarget = upcoming.type === 'type' ? 1.9 : 1.5;
+        }
+      }
+      if (activeFocus && relMs - activeFocus.t > 1200) { // fade ring after some time
+        updateFocusRing(null); activeFocus = null; focusScaleTarget = 1; }
+      // Fast ease toward target (very snappy => higher smoothing factor)
+      focusScale += (focusScaleTarget - focusScale) * 0.38;
+      if (Math.abs(focusScale - 1) < 0.002) focusScale = 1;
+
   if (theme === 'teaser') {
     // Isometric style dolly + subtle orbital tilt
     const easeIn = (k)=> k<0.5? 4*k*k*k : 1 - Math.pow(-2*k+2,3)/2;
     const k = Math.min(1, elapsed / 8); // 8s settle
     const e = easeIn(k);
-    const baseZ = 28 - e * 10 - (focus.zoom - 1.0) * 6; // extra zoom
-    const lateral = Math.sin(elapsed * 0.35) * 5 * (1-e*0.2) + fx * 0.15;
+  const baseZ = (28 - e * 10) / focusScale; // direct scale -> dolly in
+        // Apply additional pan toward active focus bbox center if available
+        let panOffsetX = 0, panOffsetY = 0;
+        if (activeFocus && activeFocus.bbox) {
+          const bb = activeFocus.bbox;
+          const cxN = (bb.x + bb.width/2) / window.innerWidth; // 0..1 center
+          const cyN = (bb.y + bb.height/2) / window.innerHeight;
+          panOffsetX = (cxN - 0.5) * 12 * (focusScale-1);
+          panOffsetY = (0.5 - cyN) * 6 * (focusScale-1);
+        }
+        const lateral = Math.sin(elapsed * 0.35) * 5 * (1-e*0.2) + fx * 0.15 + panOffsetX;
     camera.position.x = lateral;
-    camera.position.y = 9 + Math.sin(elapsed * 0.6) * 0.8 + e*1.2 + fy * 0.05;
+        camera.position.y = 9 + Math.sin(elapsed * 0.6) * 0.8 + e*1.2 + fy * 0.05 + panOffsetY*0.6;
     camera.position.z = baseZ;
     camera.rotation.z = Math.sin(elapsed * 0.15) * 0.02 + fx * 0.002; // roll
-    camera.lookAt(fx*0.4, 1.5 + fy*0.15, 0);
-    plane.rotation.y = Math.sin(elapsed * 0.5) * 0.22;
+        camera.lookAt(fx*0.4 + panOffsetX*0.2, 1.5 + fy*0.15 + panOffsetY*0.3, 0);
+        plane.rotation.y = Math.sin(elapsed * 0.5) * 0.22 + panOffsetX*0.01;
     // Edge elevation (lift corners slightly based on focus)
-    const elev = (focus.zoom -1) * 0.4;
+  const elev = (focusScale -1) * 0.4;
     plane.position.y = elev;
     parallaxGroup.children.forEach((m,i)=>{
       m.position.x *= 0.995; // slight drift damping
@@ -361,11 +438,15 @@ if (window.__COMPOSITOR_RAN) {
   }
   // Simulate quick “cut” flash by brief exposure tweak
   if (focus.cut) {
-    renderer.toneMappingExposure = 1.3;
+  renderer.toneMappingExposure = 1.35;
   } else {
     renderer.toneMappingExposure += (1 - renderer.toneMappingExposure)*0.08;
   }
-      renderer.render(scene, camera);
+  // Two-pass render: base scene -> RT, then post quad with edge-lift shader -> screen
+  renderer.setRenderTarget(rt);
+  renderer.render(scene, camera);
+  renderer.setRenderTarget(null);
+  renderer.render(postScene, postCam);
     }
 
 video.addEventListener('canplay', () => {
@@ -397,7 +478,5 @@ video.addEventListener('ended', () => {
   if (recorder && recorder.state === 'recording') recorder.stop();
 });
 
-    animate(0);
-  }
+  animate(0);
 }
-
