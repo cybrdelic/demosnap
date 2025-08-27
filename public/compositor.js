@@ -55,7 +55,11 @@ if (window.__COMPOSITOR_RAN) {
     if (subtitleEl) subtitleEl.textContent = subtitle;
     const originEl = document.getElementById('origin');
     if (originEl) originEl.textContent = window.location.host;
-    const fallbackDuration = parseInt(params.get('fallbackDuration')||'0',10);
+  const fallbackDuration = parseInt(params.get('fallbackDuration')||'0',10);
+  const targetBitrateKbps = parseInt(params.get('bitrate')||'0',10) || 0;
+  const targetFps = Math.max(1, parseInt(params.get('fps')||'30',10));
+  const qualityPreset = (params.get('quality')||'auto');
+  const ctaLink = params.get('link') || '';
 
   const scene = new Scene();
   const fogColor = new Color('#0a0f25');
@@ -63,9 +67,19 @@ if (window.__COMPOSITOR_RAN) {
 
   const camera = new PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 200);
     // Drop preserveDrawingBuffer for performance; we'll render a final frame manually for cover
-  const renderer = new WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(renderer.domElement);
+  const renderer = new WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: false });
+  let internalScale = 1.0;
+  function applyRendererSize(){
+    const w = Math.max(320, Math.floor(window.innerWidth * internalScale));
+    const h = Math.max(180, Math.floor(window.innerHeight * internalScale));
+    renderer.setSize(w, h, false);
+    renderer.domElement.style.width = window.innerWidth + 'px';
+    renderer.domElement.style.height = window.innerHeight + 'px';
+  }
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+  applyRendererSize();
+  document.body.appendChild(renderer.domElement);
+  window.addEventListener('resize', applyRendererSize);
 
     // Lighting
   scene.add(new AmbientLight(0xffffff, 0.9));
@@ -136,6 +150,16 @@ if (window.__COMPOSITOR_RAN) {
     }
 
     camera.position.set(0, 8, 22);
+    // CTA overlay if link present
+    if (ctaLink) {
+      const cta = document.createElement('a');
+      cta.href = ctaLink; cta.target = '_blank';
+      cta.textContent = new URL(ctaLink).host.replace(/^www\./,'');
+      Object.assign(cta.style, { position:'fixed', left:'1rem', bottom:'1rem', padding:'.55rem .9rem', background:'rgba(15,23,42,.72)', color:'#fff', fontSize:'.8rem', letterSpacing:'.06em', textDecoration:'none', border:'1px solid rgba(255,255,255,.12)', borderRadius:'8px', backdropFilter:'blur(8px)', WebkitBackdropFilter:'blur(8px)', zIndex:50, fontWeight:'500' });
+      cta.addEventListener('mouseenter',()=> cta.style.background='rgba(30,41,59,.9)');
+      cta.addEventListener('mouseleave',()=> cta.style.background='rgba(15,23,42,.72)');
+      document.body.appendChild(cta);
+    }
 
     // Teaser overlay activation
     const lbTop = document.getElementById('lbTop');
@@ -146,13 +170,8 @@ if (window.__COMPOSITOR_RAN) {
       [lbTop, lbBottom, vignette, grainCanvas].forEach(el => { if (el) el.hidden = false; });
     }
 
-    // Film grain generation (simple static noise updated per frame subset)
-    let grainCtx = null;
-    if (grainCanvas instanceof HTMLCanvasElement) {
-      grainCanvas.width = window.innerWidth/2;
-      grainCanvas.height = window.innerHeight/2;
-      grainCtx = grainCanvas.getContext('2d');
-    }
+  // Disable legacy CPU grain (will use shader-based later)
+  let grainCtx = null; if (grainCanvas) grainCanvas.hidden = true;
 
     let startTime = 0;
     let frameIndex = 0;
@@ -246,7 +265,9 @@ if (window.__COMPOSITOR_RAN) {
       let mime = 'video/webm;codecs=vp9';
       if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm;codecs=vp8';
       if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm';
-      recorder = new MediaRecorder(stream, { mimeType: mime });
+  const recOpts = { mimeType: mime };
+  if (targetBitrateKbps > 0) { recOpts['bitsPerSecond'] = targetBitrateKbps * 1000; }
+  recorder = new MediaRecorder(stream, recOpts);
       recorder.ondataavailable = e => { if (e.data.size) recordingChunks.push(e.data); };
       recorder.onstop = async () => {
         console.log('[teaser] recorder onstop fired; building blob');
@@ -331,10 +352,32 @@ if (window.__COMPOSITOR_RAN) {
       return camKeys[0];
     }
 
+  let lastFrameTs = performance.now();
+    let accTime = 0, accFrames = 0, evalTimer = 0;
     function animate(t) {
   requestAnimationFrame(animate);
   if (!startTime) startTime = t;
   const elapsed = (t - startTime) / 1000;
+  const now = performance.now();
+  const dt = now - lastFrameTs; lastFrameTs = now; accTime += dt; accFrames++; evalTimer += dt;
+  // Desired frame interval derived from targetFps
+  const minInterval = 1000 / targetFps * 0.55; // allow some headroom
+  if (dt < minInterval) return; // pacing: skip if too soon
+  if (evalTimer > 1000 && accFrames > 5) {
+    const avg = accTime / accFrames; // ms per (render) frame
+    if (qualityPreset === 'max') {
+      if (internalScale !== 1.0) { internalScale = 1.0; applyRendererSize(); }
+    } else if (qualityPreset === 'high') {
+      const minScale = 0.85;
+      if (avg > (1000/targetFps)*1.4 && internalScale > minScale) { internalScale = Math.max(minScale, internalScale - 0.04); applyRendererSize(); }
+      else if (avg < (1000/targetFps)*0.9 && internalScale < 1.0) { internalScale = Math.min(1.0, internalScale + 0.04); applyRendererSize(); }
+    } else { // auto
+      const minScale = 0.6;
+      if (avg > (1000/targetFps)*1.4 && internalScale > minScale) { internalScale = Math.max(minScale, internalScale - 0.06); applyRendererSize(); }
+      else if (avg < (1000/targetFps)*0.85 && internalScale < 1.0) { internalScale = Math.min(1.0, internalScale + 0.06); applyRendererSize(); }
+    }
+    accTime = 0; accFrames = 0; evalTimer = 0;
+  }
   // Determine focus inside video plane normalized (-8..8 horizontally, -4.5..4.5 vertically because plane 16x9 centered)
   const focus = sampleCam((t - startTime));
   const fx = (focus.cx - 0.5) * 16; // map to plane local coords width 16
@@ -413,20 +456,7 @@ if (window.__COMPOSITOR_RAN) {
     plane.rotation.y = Math.sin(elapsed * 0.4) * 0.15;
   }
 
-  // Grain update
-  if (grainCtx) {
-    frameIndex++;
-    if (frameIndex % 3 === 0) { // update every 3rd frame to reduce GPU stalls
-    const w = grainCanvas.width, h = grainCanvas.height;
-    const id = grainCtx.createImageData(w, h);
-    for (let i=0;i<id.data.length;i+=4){
-      const v = Math.random()*255; id.data[i]=v; id.data[i+1]=v; id.data[i+2]=v; id.data[i+3]=40; }
-    grainCtx.putImageData(id,0,0);
-    // scale up to full screen via CSS
-    grainCanvas.style.width = '100%';
-    grainCanvas.style.height = '100%';
-    }
-  }
+  // (CPU grain removed; shader-based grain will use time uniform when integrated)
 
   if (video.readyState >= 2 && video.currentTime > 0) {
     if (!coverCaptured && video.currentTime > 0.5) {
@@ -446,6 +476,7 @@ if (window.__COMPOSITOR_RAN) {
   renderer.setRenderTarget(rt);
   renderer.render(scene, camera);
   renderer.setRenderTarget(null);
+  if (edgeMat && edgeMat.uniforms && edgeMat.uniforms.uTime) edgeMat.uniforms.uTime.value = elapsed;
   renderer.render(postScene, postCam);
     }
 

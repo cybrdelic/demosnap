@@ -21,6 +21,11 @@ interface CLIArgs {
   speed: number;
   debug: boolean;
   minDuration: number;
+  serve: boolean;
+  videoBitrate: number;
+  fps: number;
+  quality: string;
+  link?: string;
 }
 
 async function recordRaw(
@@ -104,7 +109,15 @@ async function main() {
     .option('speed', { type: 'number', default: 1, describe: 'Interaction speed multiplier (>1 faster, <1 slower)' })
   .option('debug', { type: 'boolean', default: false })
   .option('minDuration', { type: 'number', default: 6000, describe: 'Minimum ms to keep recording open (pads if flow shorter)' })
+  .option('serve', { type: 'boolean', default: false, describe: 'Keep a local player server running after generation' })
+  .option('videoBitrate', { type: 'number', default: 10000, describe: 'Target composed video bitrate (kbps) hint to MediaRecorder' })
+  .option('fps', { type: 'number', default: 30, describe: 'Capture FPS (e.g. 30, 45, 60). Higher = smoother + larger file.' })
+  .option('quality', { type: 'string', default: 'auto', choices: ['auto','high','max'], describe: 'Compositor quality preset (dynamic scale, high, or locked max)' })
+  .option('link', { type: 'string', describe: 'Product / CTA URL to embed & log' })
     .parseSync() as unknown as CLIArgs;
+
+  // Auto-enable serve if a link / CTA provided (so user can open player after run)
+  if (argv.link && !argv.serve) argv.serve = true;
 
   fs.mkdirSync(argv.out, { recursive: true });
   console.log('Recording raw flow...');
@@ -138,9 +151,24 @@ async function main() {
     theme: argv.theme,
     timelineBase64: Buffer.from(JSON.stringify(events)).toString('base64'),
   debug: argv.debug,
+  videoBitrateKbps: argv.videoBitrate,
+  fps: argv.fps,
+  quality: argv.quality,
+  link: argv.link,
   });
-  server.close();
+  // Add composed route before optionally serving
+  (app as any).get && (app as any).get('/composed', (_req:any,res:any)=> res.sendFile(composedPath));
   console.log('Artifacts written:', { raw, composed: composedPath, cover: coverPath });
+  const playerComposed = `http://localhost:${port}/player?src=${encodeURIComponent(`http://localhost:${port}/composed`)}${argv.link?`&cta=${encodeURIComponent(argv.link)}`:''}`;
+  console.log('[player] Local player (composed):', playerComposed);
+  console.log('[player] Local player (raw):', `http://localhost:${port}/player?src=${encodeURIComponent(videoUrl)}`);
+  if (argv.link) console.log('[player] CTA link:', argv.link);
+  if (argv.serve) {
+    console.log('[serve] Server running. Press Ctrl+C to exit.');
+    await new Promise(()=>{}); // keep alive
+  } else {
+    server.close();
+  }
 }
 
 main().catch(err => {

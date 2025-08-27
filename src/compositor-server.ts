@@ -24,5 +24,8 @@ export function createServer(videoPath: string) {
   app.get('/compositor', (_req, res) => {
     res.sendFile(path.join(publicDir, 'compositor.html'));
   });
+  app.get('/player', (_req, res) => {
+    res.sendFile(path.join(publicDir, 'player.html'));
+  });
   return app;
 }

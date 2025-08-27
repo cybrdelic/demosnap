@@ -18,6 +18,11 @@ export interface ComposeOptions {
   theme?: string;
   timelineBase64?: string; // optional base64 of events
   debug?: boolean;
+  bitrateKbps?: number; // desired kbps for MediaRecorder guidance
+  videoBitrateKbps?: number; // new preferred bitrate field
+  fps?: number; // capture FPS
+  quality?: string; // quality preset for compositor
+  link?: string; // CTA / external URL
 }
 
 export async function compose(options: ComposeOptions) {
@@ -37,7 +42,9 @@ export async function compose(options: ComposeOptions) {
   let origin = '';
   try { const u = new URL(options.videoUrl); origin = `${u.protocol}//${u.host}`; } catch {}
   const debug = options.debug ? '&debug=1' : '';
-  const url = origin + `/compositor?video=${encodeURIComponent(options.videoUrl)}&title=${encodeURIComponent(options.title ?? '')}&subtitle=${encodeURIComponent(options.subtitle ?? '')}&theme=${encodeURIComponent(options.theme ?? 'sky')}&timeline=${encodeURIComponent(options.timelineBase64 ?? '')}&fallbackDuration=${encodeURIComponent(String(options.duration || 0))}${debug}`;
+  const effBitrate = options.videoBitrateKbps || options.bitrateKbps || '';
+  const extra = `&bitrate=${encodeURIComponent(String(effBitrate))}&link=${encodeURIComponent(options.link||'')}&fps=${encodeURIComponent(String(options.fps||''))}&quality=${encodeURIComponent(options.quality||'')}`;
+  const url = origin + `/compositor?video=${encodeURIComponent(options.videoUrl)}&title=${encodeURIComponent(options.title ?? '')}&subtitle=${encodeURIComponent(options.subtitle ?? '')}&theme=${encodeURIComponent(options.theme ?? 'sky')}&timeline=${encodeURIComponent(options.timelineBase64 ?? '')}&fallbackDuration=${encodeURIComponent(String(options.duration || 0))}${extra}${debug}`;
   console.log('[compose] navigate URL', url);
   // Expose nodeDone BEFORE navigation so page scripts can call immediately
   await page.exposeFunction('nodeDone', async (blobBase64: string, coverBase64: string) => {
