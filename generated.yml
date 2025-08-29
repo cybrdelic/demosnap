@@ -1,0 +1,27 @@
+name: Auto Generated Flow
+viewport:
+  width: 1280
+  height: 720
+steps:
+  - action: goto
+    url: "https://wikipedia.org"
+  - action: type
+    selector: "input#searchInput" # label=Search Wikipedia score=1.15 pass=scroll0
+    text: "demo"
+  - action: broll
+    duration: 900
+  - action: click
+    selector: "a.other-project-link" # label=Wikibooks
+Free textbooks score=1.12 pass=scroll1
+  - action: broll
+    duration: 1100
+  - action: click
+    selector: "a.other-project-link" # label=Wikiversity
+Free learning resources score=1.12 pass=scroll1
+  - action: broll
+    duration: 1100
+  - action: scroll
+    target: down
+    amount: 600
+  - action: broll
+    duration: 1400

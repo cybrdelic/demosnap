@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>DemoSnap Studio</title>
+<link rel="stylesheet" href="/theme.css" />
+</head>
+<body>
+  <!-- Perimeter HUD - truthful telemetry only -->
+  <div class="hud-perimeter">
+    <!-- TL: Identity/Orientation -->
+    <div class="hud-corner tl">
+      <div class="hud-row">
+        <span class="hud-label">DemoSnap</span>
+        <span class="hud-value" id="buildTag">v0.1.0</span>
+      </div>
+      <div class="hud-row" id="orientationRow">
+        <span class="hud-label">Studio</span>
+        <span class="hud-value">Ready</span>
+      </div>
+    </div>
+
+    <!-- TR: Session/Actions -->
+    <div class="hud-corner tr">
+      <div class="hud-actions">
+        <button type="button" class="hud-btn" id="themeToggle" title="Toggle theme (T)">Theme</button>
+        <button type="button" class="hud-btn" id="helpToggle" title="Help (?)">Help</button>
+      </div>
+      <div class="hud-row" id="sessionRow">
+        <span class="hud-label">Job</span>
+        <span class="hud-value" id="jobStatus">Idle</span>
+      </div>
+    </div>
+
+    <!-- BL: Wayfinding/Status -->
+    <div class="hud-corner bl">
+      <div class="hud-row">
+        <span class="hud-label">Section</span>
+        <span class="hud-value" id="sectionStatus">1/1</span>
+      </div>
+      <div class="hud-row">
+        <span class="hud-label">Steps</span>
+        <span class="hud-value" id="yamlSteps">0</span>
+      </div>
+      <div class="hud-row" id="discoveryRow">
+        <span class="hud-label">Discovery</span>
+        <span class="hud-value" id="discoveryStatus">—</span>
+      </div>
+    </div>
+
+    <!-- BR: Assist -->
+    <div class="hud-corner br">
+      <div class="hud-row">
+        <span class="hud-label">FPS</span>
+        <span class="hud-value" id="fpsCounter">—</span>
+      </div>
+      <div class="hud-row">
+        <span class="hud-label">Perf</span>
+        <span class="hud-value" id="perfStatus">Normal</span>
+      </div>
+      <div class="hud-row">
+        <span class="hud-label">A11y</span>
+        <span class="hud-value" id="a11yStatus">Std</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Progress hairline -->
+  <div class="progress-hairline progress-initial" id="progressBar"></div>
+
+  <!-- Help overlay -->
+  <div class="help-overlay" id="helpOverlay">
+    <div class="help-content">
+      <h2>Keyboard Shortcuts</h2>
+      <div class="help-shortcuts">
+        <span class="key">?</span><span>Toggle this help</span>
+        <span class="key">T</span><span>Toggle theme</span>
+        <span class="key">G</span><span>Generate flow</span>
+        <span class="key">C</span><span>Compose video</span>
+        <span class="key">J</span><span>Next section</span>
+        <span class="key">K</span><span>Previous section</span>
+        <span class="key">Esc</span><span>Close overlays</span>
+      </div>
+      <p>This interface uses a perimeter HUD system. Corners provide identity (TL), actions (TR), status (BL), and assistance (BR). All telemetry is truthful.</p>
+      <div class="mt-3">
+        <button type="button" class="btn" id="closeHelp">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Content flow - no panels -->
+  <main class="content-flow">
+    <section class="content-section" id="compose">
+      <h1 class="section-header">Compose</h1>
+      <p>Point at any public URL to generate a heuristic exploration flow or author your own YAML and compose a cinematic capture.</p>
+
+      <form id="composeForm">
+        <div class="form-section">
+          <div class="form-row">
+            <div class="form-field">
+              <label class="form-label" for="url">Target URL</label>
+              <input class="form-input" id="url" type="text" placeholder="https://example.com" required />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-field">
+              <label class="form-label" for="title">Title</label>
+              <input class="form-input" id="title" type="text" placeholder="Product Name" />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="subtitle">Subtitle</label>
+              <input class="form-input" id="subtitle" type="text" placeholder="Short tagline" />
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" id="composeBtn">Compose</button>
+            <button type="button" class="btn" id="generateBtn">Generate Flow</button>
+            <button type="button" class="btn" id="composeYamlBtn">Compose YAML</button>
+            <button type="button" class="btn" id="resetBtn">Reset</button>
+            <div id="statusText" class="status-inline"></div>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <section class="content-section" id="actions">
+      <h2 class="section-header">Actions</h2>
+      <p>Select discovered actions to build your timeline. Actions are ordered by visual priority and interaction likelihood.</p>
+
+      <div class="action-builder">
+        <div class="action-discovery" id="discoveryArea">
+          <div class="discovery-empty">
+            <span>Enter a URL and generate flow to discover actions</span>
+          </div>
+        </div>
+
+        <div class="timeline-builder" id="timelineArea">
+          <h3 class="timeline-header">Timeline</h3>
+          <div class="timeline-empty" id="timelineEmpty">
+            <span>Add actions to build your timeline</span>
+          </div>
+          <div class="timeline-actions" id="timelineActions"></div>
+          <div class="timeline-controls">
+            <button type="button" class="btn btn-small" id="clearTimeline">Clear All</button>
+            <button type="button" class="btn btn-small" id="previewTimeline">Preview</button>
+            <button type="button" class="btn btn-small" id="downloadYaml" title="Download YAML">Download</button>
+          </div>
+          <div class="yaml-preview-wrapper" id="yamlPreviewWrapper" style="display:none;">
+            <div class="yaml-preview-bar">
+              <div class="yaml-preview-title">YAML Preview</div>
+              <button type="button" class="btn btn-small" id="closeYaml">×</button>
+            </div>
+            <pre id="yamlPreview"></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="content-section" id="jobs">
+      <h2 class="section-header">Jobs</h2>
+      <div id="jobsList"></div>
+      <div id="livePreview" class="mt-4">
+        <h3 class="preview-header">Live Preview</h3>
+        <div id="previewArea" class="preview-area">
+          No active composition
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module">
+    // Theme system - instant token swap
+    let currentTheme = 'light';
+
+    function setTheme(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+      currentTheme = theme;
+      localStorage.setItem('demosnap-theme', theme);
+    }
+
+    function toggleTheme() {
+      setTheme(currentTheme === 'light' ? 'dark' : 'light');
+    }
+
+    // Initialize theme
+    const savedTheme = localStorage.getItem('demosnap-theme') || 'light';
+    setTheme(savedTheme);
+
+    // FPS counter - truthful telemetry
+    let fps = 0;
+    let lastTime = performance.now();
+    let frameCount = 0;
+
+    function updateFPS() {
+      const now = performance.now();
+      frameCount++;
+      if (now - lastTime >= 1000) {
+        fps = Math.round(frameCount * 1000 / (now - lastTime));
+        document.getElementById('fpsCounter').textContent = fps;
+        frameCount = 0;
+        lastTime = now;
+      }
+      requestAnimationFrame(updateFPS);
+    }
+    updateFPS();
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+      switch (e.key.toLowerCase()) {
+        case '?':
+          e.preventDefault();
+          document.getElementById('helpOverlay').classList.toggle('open');
+          break;
+        case 't':
+          e.preventDefault();
+          toggleTheme();
+          break;
+        case 'g':
+          e.preventDefault();
+          document.getElementById('generateBtn').click();
+          break;
+        case 'c':
+          e.preventDefault();
+          document.getElementById('composeBtn').click();
+          break;
+        case 'escape':
+          e.preventDefault();
+          document.getElementById('helpOverlay').classList.remove('open');
+          break;
+      }
+    });
+
+    // Event handlers
+    document.getElementById('themeToggle').addEventListener('click', toggleTheme);
+    document.getElementById('helpToggle').addEventListener('click', () => {
+      document.getElementById('helpOverlay').classList.toggle('open');
+    });
+    document.getElementById('closeHelp').addEventListener('click', () => {
+      document.getElementById('helpOverlay').classList.remove('open');
+    });
+
+    // Form logic - truthful status updates
+    const form = document.getElementById('composeForm');
+    const jobStatus = document.getElementById('jobStatus');
+    const statusText = document.getElementById('statusText');
+    const yamlSteps = document.getElementById('yamlSteps');
+    const discoveryStatus = document.getElementById('discoveryStatus');
+
+    let currentJob = null;
+
+  // Removed legacy plain compose submit handler (now always uses timeline YAML)
+
+    // Action discovery and timeline management
+    let discoveredActions = [];
+    let timelineActions = [];
+
+    function renderDiscoveredActions(candidates) {
+      const container = document.getElementById('discoveryArea');
+      if (!candidates || !candidates.length) {
+        container.innerHTML = '<div class="discovery-empty"><span>Enter a URL and generate flow to discover actions</span></div>';
+        return;
+      }
+
+      container.innerHTML = `
+        <div class="discovery-header">${candidates.length} Actions Discovered</div>
+        <div class="action-candidates" id="actionCandidates"></div>
+      `;
+
+      const candidatesEl = document.getElementById('actionCandidates');
+      candidatesEl.innerHTML = candidates.map((action, i) => `
+        <div class="action-item" data-index="${i}">
+          <div class="action-type">${getActionType(action)}</div>
+          <div class="action-label">${action.label || action.selector}</div>
+          <div class="action-score">${action.score.toFixed(2)}</div>
+        </div>
+      `).join('');
+
+      // Add click handlers
+      candidatesEl.querySelectorAll('.action-item').forEach(item => {
+        item.addEventListener('click', () => {
+          const index = parseInt(item.dataset.index);
+          addToTimeline(candidates[index]);
+          item.classList.add('selected');
+          setTimeout(() => item.classList.remove('selected'), 200);
+        });
+      });
+    }
+
+    function getActionType(action) {
+      if (action.tag === 'input') return 'TYPE';
+      if (action.label?.toLowerCase().includes('search')) return 'SEARCH';
+      if (action.label?.toLowerCase().includes('submit')) return 'SUBMIT';
+      return 'CLICK';
+    }
+
+    function addToTimeline(action) {
+      timelineActions.push(action);
+      renderTimeline();
+      updateTimelineStatus();
+    }
+
+    function renderTimeline() {
+      const emptyEl = document.getElementById('timelineEmpty');
+      const actionsEl = document.getElementById('timelineActions');
+
+      if (!timelineActions.length) {
+        emptyEl.style.display = 'flex';
+        actionsEl.innerHTML = '';
+        return;
+      }
+
+      emptyEl.style.display = 'none';
+      actionsEl.innerHTML = timelineActions.map((action, i) => `
+        <div class="timeline-item">
+          <div class="timeline-index">${i + 1}</div>
+          <div class="action-type">${getActionType(action)}</div>
+          <div class="action-label">${action.label || action.selector}</div>
+          <button type="button" class="btn btn-small" onclick="removeFromTimeline(${i})">×</button>
+        </div>
+      `).join('');
+    }
+
+    window.removeFromTimeline = function(index) {
+      timelineActions.splice(index, 1);
+      renderTimeline();
+      updateTimelineStatus();
+    };
+
+    function clearTimeline() {
+      timelineActions = [];
+      renderTimeline();
+      updateTimelineStatus();
+    }
+
+    function updateTimelineStatus() {
+      document.getElementById('yamlSteps').textContent = timelineActions.length;
+  updateYamlPreview(false);
+    }
+
+    function timelineToYaml() {
+      if (!timelineActions.length) return '';
+
+      const url = document.getElementById('url').value.trim();
+      const lines = [];
+      lines.push('name: Visual Timeline Flow');
+      lines.push('viewport:');
+      lines.push('  width: 1280');
+      lines.push('  height: 720');
+      lines.push('steps:');
+      if (url) {
+        lines.push(`  - action: goto`);
+        lines.push(`    url: ${JSON.stringify(url)}`);
+      }
+    timelineActions.forEach(action => {
+        const type = getActionType(action).toLowerCase();
+        if (type === 'type' || type === 'search') {
+          lines.push(`  - action: type`);
+          lines.push(`    selector: ${JSON.stringify(action.selector)}`);
+          lines.push(`    text: "demo"`);
+      if (action.label) lines.push(`    label: ${JSON.stringify(action.label)}`);
+        } else {
+          lines.push(`  - action: click`);
+          lines.push(`    selector: ${JSON.stringify(action.selector)}`);
+      if (action.label) lines.push(`    label: ${JSON.stringify(action.label)}`);
+        }
+        lines.push(`  - action: broll`);
+        lines.push(`    duration: 1100`);
+      });
+      return lines.join('\n');
+    }
+
+    function updateYamlPreview(forceOpen = true) {
+      const wrapper = document.getElementById('yamlPreviewWrapper');
+      const pre = document.getElementById('yamlPreview');
+      const yaml = timelineToYaml();
+      pre.textContent = yaml || '# (Add actions to build YAML)';
+      if (forceOpen && yaml) wrapper.style.display = 'block';
+      if (!yaml) wrapper.style.display = 'none';
+    }
+
+    // Generate flow with visual action discovery
+    document.getElementById('generateBtn').addEventListener('click', async () => {
+      const url = document.getElementById('url').value.trim();
+      if (!url) {
+        statusText.textContent = 'Enter URL first';
+        return;
+      }
+
+      discoveryStatus.textContent = 'Running';
+      statusText.textContent = 'Discovering actions...';
+
+      try {
+        const es = new EventSource(`/api/auto-flow/stream?url=${encodeURIComponent(url)}`);
+
+        es.addEventListener('progress', (e) => {
+          const data = JSON.parse(e.data);
+
+          if (data.candidates) {
+            discoveredActions = data.candidates;
+            renderDiscoveredActions(data.candidates);
+          }
+
+          if (data.stage === 'complete') {
+            discoveryStatus.textContent = 'Done';
+            statusText.textContent = 'Discovery complete';
+            es.close();
+          }
+        });
+
+        es.addEventListener('error', () => {
+          discoveryStatus.textContent = 'Error';
+          statusText.textContent = 'Discovery failed';
+          es.close();
+        });
+
+      } catch (error) {
+        discoveryStatus.textContent = 'Error';
+        statusText.textContent = error.message;
+      }
+    });
+
+    // Timeline controls
+    document.getElementById('clearTimeline').addEventListener('click', clearTimeline);
+    document.getElementById('previewTimeline').addEventListener('click', () => updateYamlPreview(true));
+    document.getElementById('closeYaml').addEventListener('click', () => document.getElementById('yamlPreviewWrapper').style.display='none');
+    document.getElementById('downloadYaml').addEventListener('click', () => {
+      const yaml = timelineToYaml();
+      if (!yaml) { statusText.textContent = 'No YAML to download'; return; }
+      const blob = new Blob([yaml], { type: 'text/yaml' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'flow.yml';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    });
+
+    // Compose with timeline
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      if (!timelineActions.length) {
+        statusText.textContent = 'Add actions to timeline first';
+        return;
+      }
+
+      const yaml = timelineToYaml();
+      const title = document.getElementById('title').value.trim();
+      const subtitle = document.getElementById('subtitle').value.trim();
+
+      jobStatus.textContent = 'Recording';
+      statusText.textContent = 'Composing video...';
+
+      try {
+        const response = await fetch('/api/compose-yaml', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ yaml, title, subtitle })
+        });
+
+        if (!response.ok) throw new Error('Compose failed');
+
+        const result = await response.json();
+        currentJob = result.id;
+        statusText.textContent = `Job ${result.id} started`;
+        pollJobStatus(result.id);
+
+      } catch (error) {
+        jobStatus.textContent = 'Error';
+        statusText.textContent = error.message;
+      }
+    });
+
+    function pollJobStatus(jobId) {
+      const poll = setInterval(async () => {
+        try {
+          const response = await fetch('/api/jobs');
+          const jobs = await response.json();
+          const job = jobs.find(j => j.id === jobId);
+
+          if (job) {
+            if (job.composed) {
+              jobStatus.textContent = 'Complete';
+              statusText.textContent = 'Video ready';
+
+              // Update live preview
+              const previewArea = document.getElementById('previewArea');
+              previewArea.innerHTML = `
+                <video controls style="max-width: 100%; max-height: 400px;">
+                  <source src="/studio_out/${jobId}/composed.webm" type="video/webm">
+                </video>
+              `;
+
+              clearInterval(poll);
+            }
+          }
+        } catch (error) {
+          console.warn('Poll error:', error);
+        }
+      }, 2000);
+
+      // Stop polling after 5 minutes
+      setTimeout(() => clearInterval(poll), 300000);
+    }
+
+    // Load jobs on page load
+    async function loadJobs() {
+      try {
+        const response = await fetch('/api/jobs');
+        const jobs = await response.json();
+
+        const jobsList = document.getElementById('jobsList');
+        jobsList.innerHTML = jobs.map(job => `
+          <div style="display: flex; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid var(--color-border);">
+            <div>
+              <div style="font: 500 14px/1.2 system-ui; color: var(--color-text);">${job.title || 'Untitled'}</div>
+              <div style="font: 400 var(--hud-size)/1.2 var(--font-mono); color: var(--hud-text); text-transform: uppercase;">
+                ${job.id.replace('job_', '')} • ${job.events || 0} events
+              </div>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              ${job.composed ? `<a href="/studio_out/${job.id}/composed.webm" target="_blank" style="color: var(--color-accent);">Video</a>` : ''}
+              ${job.cover ? `<a href="/studio_out/${job.id}/cover.png" target="_blank" style="color: var(--color-accent);">Cover</a>` : ''}
+            </div>
+          </div>
+        `).join('');
+
+      } catch (error) {
+        console.warn('Failed to load jobs:', error);
+      }
+    }
+
+    loadJobs();
+
+    // Monitor reduced motion preference
+    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    function handleMotionChange(e) {
+      document.getElementById('a11yStatus').textContent = e.matches ? 'Reduced' : 'Std';
+    }
+    mediaQuery.addListener(handleMotionChange);
+    handleMotionChange(mediaQuery);
+  </script>
+</body>
+</html>

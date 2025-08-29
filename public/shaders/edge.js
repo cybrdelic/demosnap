@@ -1,0 +1,7 @@
+// Edge detection + lift postprocess shader used by compositor
+// Separated for readability & potential reuse.
+// Exported as plain string constants (kept identical to prior inline version).
+
+export const edgeFrag = `precision highp float;\nuniform sampler2D uBase;\nuniform vec2 uTexel;\nuniform float uEdge;\nuniform float uLift;\nuniform float uBorder;\nvarying vec2 vUv;\nfloat luma(vec3 c){return dot(c,vec3(.299,.587,.114));}\nvoid main(){\n  vec2 t=uTexel;\n  float tl=luma(texture2D(uBase,vUv+vec2(-t.x,-t.y)).rgb);\n  float l=luma(texture2D(uBase,vUv+vec2(-t.x,0.)).rgb);\n  float bl=luma(texture2D(uBase,vUv+vec2(-t.x,t.y)).rgb);\n  float t0=luma(texture2D(uBase,vUv+vec2(0.,-t.y)).rgb);\n  float c=luma(texture2D(uBase,vUv).rgb);\n  float b=luma(texture2D(uBase,vUv+vec2(0.,t.y)).rgb);\n  float tr=luma(texture2D(uBase,vUv+vec2(t.x,-t.y)).rgb);\n  float r=luma(texture2D(uBase,vUv+vec2(t.x,0.)).rgb);\n  float br=luma(texture2D(uBase,vUv+vec2(t.x,t.y)).rgb);\n  float gx=(tr+2.*r+br)-(tl+2.*l+bl);\n  float gy=(bl+2.*b+br)-(tl+2.*t0+tr);\n  float edge=clamp(sqrt(gx*gx+gy*gy)*uEdge,0.,1.);\n  vec2 d=abs(vUv-.5)*2.;\n  float border=pow(max(d.x,d.y),1.5);\n  float lift=uLift*mix(1.,border,uBorder);\n  vec3 base=texture2D(uBase,vUv).rgb;\n  gl_FragColor=vec4(base+edge*lift,1.);\n}`;
+
+export const edgeVert = `varying vec2 vUv;\nvoid main(){\n  vUv=uv;\n  gl_Position=vec4(position,1.);\n}`;

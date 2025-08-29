@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MediaRecorder Debug</title>
+</head>
+<body>
+    <canvas id="canvas" width="640" height="360"></canvas>
+    <div id="info"></div>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const info = document.getElementById('info');
+
+        let startTime = 0;
+        let frame = 0;
+
+        function drawFrame() {
+            const elapsed = Date.now() - startTime;
+
+            // Clear canvas
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw timestamp
+            ctx.fillStyle = '#fff';
+            ctx.font = '20px Arial';
+            ctx.fillText(`Time: ${elapsed}ms`, 10, 30);
+            ctx.fillText(`Frame: ${frame}`, 10, 60);
+
+            // Draw moving circle to show animation
+            const x = (Math.sin(elapsed * 0.001) * 0.5 + 0.5) * canvas.width;
+            const y = (Math.cos(elapsed * 0.0015) * 0.5 + 0.5) * canvas.height;
+
+            ctx.fillStyle = '#f00';
+            ctx.beginPath();
+            ctx.arc(x, y, 20, 0, Math.PI * 2);
+            ctx.fill();
+
+            frame++;
+            info.textContent = `Elapsed: ${elapsed}ms, Frame: ${frame}`;
+
+            requestAnimationFrame(drawFrame);
+        }
+
+        async function startTest() {
+            startTime = Date.now();
+
+            // Start animation
+            requestAnimationFrame(drawFrame);
+
+            // Start recording
+            const stream = canvas.captureStream(30);
+            const chunks = [];
+
+            const recorder = new MediaRecorder(stream, {
+                mimeType: 'video/webm;codecs=vp9'
+            });
+
+            recorder.ondataavailable = (e) => {
+                if (e.data.size) chunks.push(e.data);
+            };
+
+            recorder.onstop = () => {
+                const blob = new Blob(chunks, { type: 'video/webm' });
+                const url = URL.createObjectURL(blob);
+
+                // Create video element to check duration
+                const video = document.createElement('video');
+                video.src = url;
+                video.onloadedmetadata = () => {
+                    console.log('Recorded video duration:', video.duration, 'seconds');
+                    console.log('Expected duration: 9.2 seconds');
+                    console.log('Blob size:', blob.size, 'bytes');
+                    info.textContent += ` | Recorded: ${video.duration}s`;
+                };
+            };
+
+            console.log('Starting recording for 9200ms');
+            recorder.start();
+
+            setTimeout(() => {
+                console.log('Stopping recording');
+                recorder.stop();
+            }, 9200); // 9.2 seconds like our compositor
+        }
+
+        startTest();
+    </script>
+</body>
+</html>
