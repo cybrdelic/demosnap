@@ -161,7 +161,14 @@
 
     <section class="content-section" id="jobs">
       <h2 class="section-header">Jobs</h2>
-      <div id="jobsList"></div>
+      <div class="jobs-toolbar">
+        <div class="jobs-toolbar-title">Recent Videos</div>
+        <div class="jobs-toolbar-actions">
+          <button type="button" class="btn btn-small" id="refreshJobs">Refresh</button>
+          <button type="button" class="btn btn-small btn-danger-outline" id="purgeAllJobs" title="Delete ALL jobs">Purge All</button>
+        </div>
+      </div>
+      <div id="jobsList" class="jobs-grid"></div>
       <div id="livePreview" class="mt-4">
         <h3 class="preview-header">Live Preview</h3>
         <div id="previewArea" class="preview-area">
@@ -259,7 +266,18 @@
     let discoveredActions = [];
     let timelineActions = [];
 
-    function renderDiscoveredActions(candidates) {
+  function renderDiscoveredActions(candidates) {
+      // Filter out destructive / low-value or self-referential studio controls
+      const blockRe = /(delete|purge|danger|close|help|purge\s*all)/i;
+      candidates = (candidates||[]).filter(a => {
+        const lab = (a.label||'');
+        const sel = (a.selector||'');
+        if (blockRe.test(lab) || blockRe.test(sel)) return false;
+        if (/composeBtn/.test(sel)) return false; // avoid immediate compose recursion
+        // Exclude job list playback / cover controls (produce non-unique selectors & recursion risk)
+        if (/data-play/.test(sel) || /#jobsList/.test(sel) || /\bPlay\b/i.test(lab)) return false;
+        return true;
+      });
       const container = document.getElementById('discoveryArea');
       if (!candidates || !candidates.length) {
         container.innerHTML = '<div class="discovery-empty"><span>Enter a URL and generate flow to discover actions</span></div>';
@@ -272,13 +290,16 @@
       `;
 
       const candidatesEl = document.getElementById('actionCandidates');
-      candidatesEl.innerHTML = candidates.map((action, i) => `
-        <div class="action-item" data-index="${i}">
+      candidatesEl.innerHTML = candidates.map((action, i) => {
+        const dur = 1100; // default broll
+        return `
+        <div class="action-item" data-index="${i}" title="${action.selector}">
           <div class="action-type">${getActionType(action)}</div>
           <div class="action-label">${action.label || action.selector}</div>
           <div class="action-score">${action.score.toFixed(2)}</div>
-        </div>
-      `).join('');
+          <div class="action-meta" style="font:400 10px var(--font-mono); letter-spacing:.14em; color:var(--hud-label);">${dur}ms</div>
+        </div>`;
+      }).join('');
 
       // Add click handlers
       candidatesEl.querySelectorAll('.action-item').forEach(item => {
@@ -292,8 +313,12 @@
     }
 
     function getActionType(action) {
-      if (action.tag === 'input') return 'TYPE';
-      if (action.label?.toLowerCase().includes('search')) return 'SEARCH';
+      const tag = (action.tag||'').toLowerCase();
+      // Treat only actual text entry fields as TYPE/SEARCH
+      if (tag === 'input' || tag === 'textarea') {
+        if (action.label?.toLowerCase().includes('search')) return 'SEARCH';
+        return 'TYPE';
+      }
       if (action.label?.toLowerCase().includes('submit')) return 'SUBMIT';
       return 'CLICK';
     }
@@ -304,7 +329,28 @@
       updateTimelineStatus();
     }
 
-    function renderTimeline() {
+    // Bulk add with safety filtering & dedupe (can be invoked manually via console for now)
+    function autoAddAllSafe(){
+      const forbidRe = /(delete|purge|danger|closehelp|close help|purge\s*all)/i;
+      const seen = new Map();
+      const filtered = discoveredActions.filter(a => {
+        const lab=(a.label||''); const sel=(a.selector||'');
+        if(forbidRe.test(lab) || forbidRe.test(sel)) return false;
+        if(/btn-danger-outline/i.test(sel)) return false;
+        if(/#closeHelp|#helpOverlay|closeHelp/i.test(sel)) return false;
+        const sig = sel||lab;
+        const count = seen.get(sig)||0;
+        if(count>1) return false;
+        seen.set(sig,count+1);
+        return true;
+      });
+      timelineActions = filtered;
+      renderTimeline();
+      updateTimelineStatus();
+    }
+    window.autoAddAllSafe = autoAddAllSafe;
+
+  function renderTimeline() {
       const emptyEl = document.getElementById('timelineEmpty');
       const actionsEl = document.getElementById('timelineActions');
 
@@ -315,14 +361,43 @@
       }
 
       emptyEl.style.display = 'none';
-      actionsEl.innerHTML = timelineActions.map((action, i) => `
-        <div class="timeline-item">
+      actionsEl.innerHTML = timelineActions.map((action, i) => {
+        const type = getActionType(action);
+        const baseMs = type === 'TYPE' || type === 'SEARCH' ? 1600 : 1100;
+        return `
+        <div class="timeline-item" draggable="true" data-index="${i}">
           <div class="timeline-index">${i + 1}</div>
-          <div class="action-type">${getActionType(action)}</div>
+          <div class="action-type">${type}</div>
           <div class="action-label">${action.label || action.selector}</div>
+          <div class="timeline-duration" style="font:400 10px var(--font-mono); color:var(--hud-label);">${baseMs}ms</div>
           <button type="button" class="btn btn-small" onclick="removeFromTimeline(${i})">×</button>
-        </div>
-      `).join('');
+        </div>`;
+      }).join('');
+
+      // Drag reorder
+      actionsEl.querySelectorAll('.timeline-item').forEach(item => {
+        item.addEventListener('dragstart', e => {
+          e.dataTransfer.setData('text/plain', item.dataset.index);
+          item.classList.add('dragging');
+        });
+        item.addEventListener('dragend', () => item.classList.remove('dragging'));
+      });
+      actionsEl.addEventListener('dragover', e => {
+        e.preventDefault();
+        const dragging = actionsEl.querySelector('.dragging');
+        if (!dragging) return;
+        const after = Array.from(actionsEl.querySelectorAll('.timeline-item:not(.dragging)')).find(el => {
+          const box = el.getBoundingClientRect();
+            return e.clientY < box.top + box.height / 2;
+        });
+        if (after) actionsEl.insertBefore(dragging, after); else actionsEl.appendChild(dragging);
+      });
+      actionsEl.addEventListener('drop', () => {
+        const newOrder = Array.from(actionsEl.querySelectorAll('.timeline-item')).map(el => timelineActions[parseInt(el.getAttribute('data-index'))]);
+        timelineActions = newOrder;
+        renderTimeline();
+        updateTimelineStatus();
+      }, { once: true });
     }
 
     window.removeFromTimeline = function(index) {
@@ -342,7 +417,7 @@
   updateYamlPreview(false);
     }
 
-    function timelineToYaml() {
+  function timelineToYaml() {
       if (!timelineActions.length) return '';
 
       const url = document.getElementById('url').value.trim();
@@ -356,7 +431,18 @@
         lines.push(`  - action: goto`);
         lines.push(`    url: ${JSON.stringify(url)}`);
       }
-    timelineActions.forEach(action => {
+  const params = new URLSearchParams(location.search);
+  const longMode = params.get('long') === '1';
+  const perBroll = longMode ? 2200 : 1100;
+    // Filter again defensively (in case timelineActions already contains forbidden actions)
+    const forbidRe = /(delete|purge|danger|closehelp|close help|purge\s*all)/i;
+    timelineActions.filter(a => {
+      const lab = (a.label||''); const sel=(a.selector||'');
+      if(forbidRe.test(lab) || forbidRe.test(sel)) return false;
+      if(/btn-danger-outline/.test(sel)) return false;
+      if(/#closeHelp|#helpOverlay|closeHelp/i.test(sel)) return false;
+      return true;
+    }).forEach(action => {
         const type = getActionType(action).toLowerCase();
         if (type === 'type' || type === 'search') {
           lines.push(`  - action: type`);
@@ -369,8 +455,18 @@
       if (action.label) lines.push(`    label: ${JSON.stringify(action.label)}`);
         }
         lines.push(`  - action: broll`);
-        lines.push(`    duration: 1100`);
+        lines.push(`    duration: ${perBroll}`);
       });
+    if(longMode){
+      // Add extra theme toggle cycles to enrich motion & length
+      const themeCycles = 6;
+      for(let i=0;i<themeCycles;i++){
+        lines.push(`  - action: click`);
+        lines.push(`    selector: "button#themeToggle"`);
+        lines.push(`  - action: broll`);
+        lines.push(`    duration: ${Math.round(perBroll*0.9)}`);
+      }
+    }
       return lines.join('\n');
     }
 
@@ -385,6 +481,8 @@
 
     // Generate flow with visual action discovery
     document.getElementById('generateBtn').addEventListener('click', async () => {
+  const params = new URLSearchParams(location.search);
+  const longMode = params.get('long') === '1';
       const url = document.getElementById('url').value.trim();
       if (!url) {
         statusText.textContent = 'Enter URL first';
@@ -403,11 +501,30 @@
           if (data.candidates) {
             discoveredActions = data.candidates;
             renderDiscoveredActions(data.candidates);
+            if (longMode) {
+              // auto-pick every candidate into timeline with filtering + dedupe
+              const forbidRe = /(delete|purge|danger|closehelp|close help|purge\s*all)/i;
+              const seen = new Map();
+              timelineActions = discoveredActions.filter(a => {
+                const lab = (a.label||'');
+                const sel = (a.selector||'');
+                if(forbidRe.test(lab) || forbidRe.test(sel)) return false;
+                if(/btn-danger-outline/i.test(sel)) return false;
+                if(/#closeHelp|#helpOverlay|closeHelp/i.test(sel)) return false;
+                const sig = sel || lab;
+                const count = seen.get(sig)||0;
+                if(count > 1) return false; // allow at most 2 of same selector
+                seen.set(sig,count+1);
+                return true;
+              });
+              renderTimeline();
+              updateYamlPreview(false);
+            }
           }
 
           if (data.stage === 'complete') {
             discoveryStatus.textContent = 'Done';
-            statusText.textContent = 'Discovery complete';
+            statusText.textContent = longMode ? 'Discovery complete (auto-added all)' : 'Discovery complete';
             es.close();
           }
         });
@@ -428,7 +545,7 @@
     document.getElementById('clearTimeline').addEventListener('click', clearTimeline);
     document.getElementById('previewTimeline').addEventListener('click', () => updateYamlPreview(true));
     document.getElementById('closeYaml').addEventListener('click', () => document.getElementById('yamlPreviewWrapper').style.display='none');
-    document.getElementById('downloadYaml').addEventListener('click', () => {
+  document.getElementById('downloadYaml').addEventListener('click', () => {
       const yaml = timelineToYaml();
       if (!yaml) { statusText.textContent = 'No YAML to download'; return; }
       const blob = new Blob([yaml], { type: 'text/yaml' });
@@ -515,20 +632,42 @@
         const jobs = await response.json();
 
         const jobsList = document.getElementById('jobsList');
-        jobsList.innerHTML = jobs.map(job => `
-          <div style="display: flex; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid var(--color-border);">
-            <div>
-              <div style="font: 500 14px/1.2 system-ui; color: var(--color-text);">${job.title || 'Untitled'}</div>
-              <div style="font: 400 var(--hud-size)/1.2 var(--font-mono); color: var(--hud-text); text-transform: uppercase;">
-                ${job.id.replace('job_', '')} • ${job.events || 0} events
+        jobsList.innerHTML = jobs.map(job => {
+          const created = job.created ? new Date(job.created).toLocaleTimeString() : '';
+          return `
+          <div class="job-card" data-id="${job.id}">
+            <div class="job-card-header">
+              <div style="flex:1; min-width:0;">
+                <div class="job-card-title">${job.title || 'Untitled'}</div>
+                <div class="job-card-sub">${job.id.replace('job_','')} • ${job.events||0} events</div>
               </div>
+              <button class="btn btn-small btn-danger-outline" data-delete="${job.id}" title="Delete">×</button>
             </div>
-            <div style="display: flex; gap: 8px; align-items: center;">
-              ${job.composed ? `<a href="/studio_out/${job.id}/composed.webm" target="_blank" style="color: var(--color-accent);">Video</a>` : ''}
-              ${job.cover ? `<a href="/studio_out/${job.id}/cover.png" target="_blank" style="color: var(--color-accent);">Cover</a>` : ''}
+            <div class="job-card-actions">
+              ${job.composed ? `<button class="btn btn-small" data-play="${job.id}">Play</button>` : '<span class="job-card-sub" style="font-size:10px;">Processing…</span>'}
+              ${job.cover ? `<a class="btn btn-small" href="/studio_out/${job.id}/cover.png" target="_blank">Cover</a>` : ''}
             </div>
-          </div>
-        `).join('');
+            <div class="job-card-meta">${created}</div>
+          </div>`;
+        }).join('');
+
+        // Delete handlers
+        jobsList.querySelectorAll('[data-delete]').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const id = btn.getAttribute('data-delete');
+            if (!confirm('Delete job ' + id + '?')) return;
+            await fetch('/api/jobs/' + id, { method: 'DELETE' });
+            loadJobs();
+          });
+        });
+        // Play handlers
+        jobsList.querySelectorAll('[data-play]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const id = btn.getAttribute('data-play');
+            const previewArea = document.getElementById('previewArea');
+            previewArea.innerHTML = `<video controls style="max-width:100%; max-height:400px;" autoplay loop><source src="/studio_out/${id}/composed.webm" type="video/webm" /></video>`;
+          });
+        });
 
       } catch (error) {
         console.warn('Failed to load jobs:', error);
@@ -536,6 +675,16 @@
     }
 
     loadJobs();
+    document.getElementById('refreshJobs').addEventListener('click', loadJobs);
+    document.getElementById('purgeAllJobs').addEventListener('click', async () => {
+      if (!confirm('Delete ALL jobs? This cannot be undone.')) return;
+      const response = await fetch('/api/jobs');
+      const jobs = await response.json();
+      for (const j of jobs) {
+        await fetch('/api/jobs/' + j.id, { method: 'DELETE' });
+      }
+      loadJobs();
+    });
 
     // Monitor reduced motion preference
     const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');

@@ -3,53 +3,218 @@ export interface TimelineEvent { t:number; type:string; x?:number; y?:number; w?
 export interface CamKey { t:number; cx:number; cy:number; zoom:number; cut:boolean; }
 export interface CamConfig { leadMs:number; clusterMs:number; maxZoom:number; posLerp:number; zoomLerp:number; movementDeadZone:number; exposureCut:number; exposureLerp:number; settleSeconds:number; idleDriftAmp:number; idlePushInZ:number; dedupeDist:number; dedupeZoomDelta:number; cutMoveThreshold:number; cutZoomThreshold:number; }
 
-export function buildCamConfig(style:string):CamConfig {
-  const CAM:CamConfig={leadMs:900,clusterMs:600,maxZoom:3.2,posLerp:.065,zoomLerp:.07,movementDeadZone:.018,exposureCut:1.08,exposureLerp:.06,settleSeconds:8,idleDriftAmp:5,idlePushInZ:10,dedupeDist:.022,dedupeZoomDelta:.18,cutMoveThreshold:.06,cutZoomThreshold:.28};
-  if(style==='aggressive'){
-    CAM.clusterMs=160; CAM.maxZoom=4.1; CAM.idleDriftAmp=2.2; CAM.posLerp=.22; CAM.zoomLerp=.18;
+export function buildCamConfig(style: string): CamConfig {
+  const CAM: CamConfig = {
+    leadMs: 900,
+    clusterMs: 600,
+    maxZoom: 3.2,
+    posLerp: 0.065,
+    zoomLerp: 0.07,
+    movementDeadZone: 0.018,
+    exposureCut: 1.08,
+    exposureLerp: 0.06,
+    settleSeconds: 8,
+    idleDriftAmp: 5,
+    idlePushInZ: 10,
+    dedupeDist: 0.022,
+    dedupeZoomDelta: 0.18,
+    cutMoveThreshold: 0.06,
+    cutZoomThreshold: 0.28,
+  };
+  if (style === 'aggressive') {
+    CAM.clusterMs = 160;
+    CAM.maxZoom = 4.1;
+    CAM.idleDriftAmp = 2.2;
+    CAM.posLerp = 0.22;
+    CAM.zoomLerp = 0.18;
+  } else if (style === 'cinematic') {
+    // Smoother, fewer cuts, lower max zoom, longer lead-in
+    CAM.leadMs = 1400;
+    CAM.clusterMs = 950;
+    CAM.maxZoom = 2.9;
+    CAM.posLerp = 0.045;
+    CAM.zoomLerp = 0.05;
+    CAM.idleDriftAmp = 3.2;
+    CAM.cutMoveThreshold = 0.09; // need larger move to justify a cut
+    CAM.cutZoomThreshold = 0.34;
+    CAM.dedupeDist = 0.018; // tighten dedupe to remove micro wiggles
   }
   return CAM;
 }
 
-export function buildCamKeys(timeline:TimelineEvent[], style:string, CAM:CamConfig):CamKey[] {
-  const keys:CamKey[]=[];
-  for(const ev of timeline){
-    if(ev.x==null || ev.y==null) continue;
-    let z=1.25;
-    if(ev.type==='prefocus') z=1.35; else if(ev.type==='click') z=1.7; else if(ev.type==='type') z=1.52; else if(ev.type==='press') z=1.85; else if(ev.type==='wait') z=1.4;
-    if(style==='aggressive'){
-      if(ev.type==='click') z+=0.55; else if(ev.type==='type') z+=0.45; else if(ev.type==='press') z+=0.65;
+export function buildCamKeys(timeline: TimelineEvent[], style: string, CAM: CamConfig): CamKey[] {
+  // 1. Pre-filter: prune overly chatty load-progress events (semantic noise reduction)
+  const filtered: TimelineEvent[] = [];
+  let lastProgressT = -Infinity;
+  const LOAD_PROGRESS_MIN_GAP = 450; // ms between accepted load-progress events
+  for (const ev of timeline) {
+    if (ev.type === 'load-progress') {
+      if (ev.t - lastProgressT < LOAD_PROGRESS_MIN_GAP) continue;
+      lastProgressT = ev.t;
     }
-    if(ev.w && ev.h){ const area=ev.w*ev.h; z*=Math.min(2.8,1+(0.25-Math.min(0.25,area))*3.8); }
-    z=Math.min(z,CAM.maxZoom);
-    const cut = style==='aggressive'? (ev.type!=='prefocus') : (ev.type==='click');
-    keys.push({t:ev.t,cx:ev.x,cy:ev.y,zoom:z,cut});
+    filtered.push(ev);
   }
-  keys.sort((a,b)=>a.t-b.t);
-  const clustered:CamKey[]=[];
-  for(const k of keys){
-    const prev=clustered[clustered.length-1];
-    if(prev && (k.t-prev.t) < CAM.clusterMs){
-      prev.cx=(prev.cx+k.cx)/2; prev.cy=(prev.cy+k.cy)/2; prev.zoom=Math.max(prev.zoom,k.zoom); prev.cut=prev.cut||k.cut;
-    } else clustered.push({...k});
-  }
-  if(clustered.length && clustered[0].t>0) clustered.unshift({t:0,cx:.5,cy:.5,zoom:1,cut:false});
-  const out:CamKey[]=[];
-  for(const k of clustered){
-    const prev=out[out.length-1];
-    if(prev && style!=='aggressive'){
-      const dx=k.cx-prev.cx, dy=k.cy-prev.cy; const dist=Math.hypot(dx,dy); const zd=Math.abs(k.zoom-prev.zoom);
-      if(dist<CAM.dedupeDist && zd<CAM.dedupeZoomDelta){
-        prev.cx=(prev.cx+k.cx)/2; prev.cy=(prev.cy+k.cy)/2; prev.zoom=Math.max(prev.zoom,k.zoom); prev.cut=prev.cut||k.cut; continue;
+
+  const keys: CamKey[] = [];
+  let shotIndex = 0;
+  let lastCutT = -Infinity;
+  for (const ev of filtered) {
+    if (ev.x == null || ev.y == null) continue;
+    // 2. Semantic zoom intents
+    let z = 1.25;
+    if (style === 'cinematic') {
+      switch (ev.type) {
+        case 'establish':
+          z = 1.15;
+          break; // wide establishing
+        case 'load-start':
+          z = 1.24;
+          break;
+        case 'load-progress':
+          z = 1.26;
+          break;
+        case 'load-complete':
+          z = 1.32;
+          break;
+        case 'result-focus':
+          z = 1.48;
+          break;
+        case 'prefocus':
+          z = 1.32;
+          break;
+        case 'click':
+          z = 1.5;
+          break;
+        case 'type':
+          z = 1.45;
+          break;
+        case 'press':
+          z = 1.55;
+          break;
+        case 'wait':
+          z = 1.28;
+          break;
+        case 'broll-focus':
+          z = 1.26;
+          break;
+        case 'postclick':
+          z = 1.48;
+          break;
+      }
+    } else {
+      switch (ev.type) {
+        case 'establish':
+          z = 1.12;
+          break;
+        case 'load-start':
+          z = 1.22;
+          break;
+        case 'load-progress':
+          z = 1.25;
+          break;
+        case 'load-complete':
+          z = 1.3;
+          break;
+        case 'result-focus':
+          z = 1.55;
+          break;
+        case 'prefocus':
+          z = 1.35;
+          break;
+        case 'click':
+          z = 1.7;
+          break;
+        case 'type':
+          z = 1.52;
+          break;
+        case 'press':
+          z = 1.85;
+          break;
+        case 'wait':
+          z = 1.4;
+          break;
       }
     }
-    out.push({...k});
+    if (style === 'aggressive') {
+      if (ev.type === 'click') z += 0.55;
+      else if (ev.type === 'type') z += 0.45;
+      else if (ev.type === 'press') z += 0.65;
+    }
+    // 3. Responsive zoom scaling for small focus boxes (smaller area -> deeper zoom)
+    if (ev.w && ev.h) {
+      const area = ev.w * ev.h; // assuming normalized [0..1]
+      z *= Math.min(2.8, 1 + (0.25 - Math.min(0.25, area)) * 3.8);
+    }
+    z = Math.min(z, CAM.maxZoom);
+
+    // 4. Cut logic
+    let cut = style === 'aggressive' ? ev.type !== 'prefocus' : ev.type === 'click';
+    if (style === 'cinematic') {
+      const actionable = ev.type === 'click' || ev.type === 'result-focus' || ev.type === 'press';
+      const MIN_CUT_GAP = CAM.clusterMs * 2.1; // enforce spacing between cuts
+      if (actionable && ev.t - lastCutT > MIN_CUT_GAP) {
+        // Avoid cutting on purely loading semantics
+        cut = true;
+      } else {
+        cut = false;
+      }
+      if (ev.type === 'establish') cut = false; // establishing is a gentle move-in
+      if (cut) lastCutT = ev.t;
+    }
+
+    // 5. Framing / rule-of-thirds bias (skip establishing for classic centered opener)
+    let cx = ev.x,
+      cy = ev.y;
+    if (style === 'cinematic' && ev.type !== 'establish') {
+      const biasX = shotIndex % 2 === 0 ? -0.07 : 0.07;
+      const biasY = shotIndex % 3 === 0 ? -0.05 : 0.04;
+      cx = Math.min(0.85, Math.max(0.15, cx + biasX));
+      cy = Math.min(0.85, Math.max(0.15, cy + biasY));
+    }
+    keys.push({ t: ev.t, cx, cy, zoom: z, cut });
+    shotIndex++;
   }
-  if(style!=='aggressive'){
-    for(let i=1;i<out.length;i++){
-      const a=out[i-1], b=out[i];
-      const dx=b.cx-a.cx, dy=b.cy-a.cy; const dist=Math.hypot(dx,dy); const zd=Math.abs(b.zoom-a.zoom);
-      const shouldCut = dist>=CAM.cutMoveThreshold || zd>=CAM.cutZoomThreshold; b.cut = b.cut && shouldCut;
+  keys.sort((a, b) => a.t - b.t);
+  const clustered: CamKey[] = [];
+  for (const k of keys) {
+    const prev = clustered[clustered.length - 1];
+    if (prev && k.t - prev.t < CAM.clusterMs) {
+      prev.cx = (prev.cx + k.cx) / 2;
+      prev.cy = (prev.cy + k.cy) / 2;
+      prev.zoom = Math.max(prev.zoom, k.zoom);
+      prev.cut = prev.cut || k.cut;
+    } else clustered.push({ ...k });
+  }
+  if (clustered.length && clustered[0].t > 0)
+    clustered.unshift({ t: 0, cx: 0.5, cy: 0.5, zoom: 1, cut: false });
+  const out: CamKey[] = [];
+  for (const k of clustered) {
+    const prev = out[out.length - 1];
+    if (prev && style !== 'aggressive') {
+      const dx = k.cx - prev.cx,
+        dy = k.cy - prev.cy;
+      const dist = Math.hypot(dx, dy);
+      const zd = Math.abs(k.zoom - prev.zoom);
+      if (dist < CAM.dedupeDist && zd < CAM.dedupeZoomDelta) {
+        prev.cx = (prev.cx + k.cx) / 2;
+        prev.cy = (prev.cy + k.cy) / 2;
+        prev.zoom = Math.max(prev.zoom, k.zoom);
+        prev.cut = prev.cut || k.cut;
+        continue;
+      }
+    }
+    out.push({ ...k });
+  }
+  if (style !== 'aggressive') {
+    for (let i = 1; i < out.length; i++) {
+      const a = out[i - 1],
+        b = out[i];
+      const dx = b.cx - a.cx,
+        dy = b.cy - a.cy;
+      const dist = Math.hypot(dx, dy);
+      const zd = Math.abs(b.zoom - a.zoom);
+      const shouldCut = dist >= CAM.cutMoveThreshold || zd >= CAM.cutZoomThreshold;
+      b.cut = b.cut && shouldCut;
     }
   }
   return out;

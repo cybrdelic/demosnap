@@ -36,9 +36,19 @@ function parseParams(): Params {
   const timeline: TimelineEvent[] = [];
   try {
     const tl = q.get('timeline');
-    if (tl) timeline.push(...JSON.parse(atob(tl)));
+    if (tl) {
+      const parsed = JSON.parse(atob(tl));
+      if (parsed && parsed.serverTimeline) {
+        // defer actual timeline fetch to runtime via global hook
+        (window as any).__FETCH_TIMELINE__ = true;
+      } else if (Array.isArray(parsed)) {
+        timeline.push(...parsed);
+      }
+    }
   } catch {}
-  if (camStyle === 'default' && timeline.length > 2 && !q.get('cam')) camStyle = 'aggressive';
+  if (camStyle === 'default' && timeline.length > 2 && !q.get('cam')) {
+    camStyle = timeline.length > 6 ? 'aggressive' : 'cinematic';
+  }
 
   const fallbackDuration = parseInt(q.get('fallbackDuration') || '8000', 10);
   console.log('[compositor] URL parameters:', {
@@ -449,9 +459,31 @@ const CompositorApp: React.FC = () => {
     CAMRef.current = buildCamConfig(paramsVal.camStyle);
     camKeysRef.current = buildCamKeys(paramsVal.timeline, paramsVal.camStyle, CAMRef.current);
     focusEventsRef.current = paramsVal.timeline.filter((ev: TimelineEvent) =>
-      ['click', 'type', 'prefocus', 'wait', 'press'].includes(ev.type)
+      ['click', 'type', 'prefocus', 'wait', 'press'].includes((ev as any).type)
     );
-    setReady(true);
+    // If timeline was deferred, fetch it now
+    if ((window as any).__FETCH_TIMELINE__) {
+      fetch('/timeline')
+        .then((r) => r.json())
+        .then((serverTl: any[]) => {
+          params.current.timeline = serverTl;
+          camKeysRef.current = buildCamKeys(
+            serverTl as any,
+            params.current.camStyle,
+            CAMRef.current
+          );
+          focusEventsRef.current = serverTl.filter((ev: any) =>
+            ['click', 'type', 'prefocus', 'wait', 'press'].includes(ev.type)
+          );
+          setReady(true);
+        })
+        .catch((e) => {
+          console.warn('[compositor] failed fetching /timeline', e);
+          setReady(true);
+        });
+    } else {
+      setReady(true);
+    }
 
     // Signal compositor ready early for basic functionality
     console.log('[compositor] Scene initialized, signaling ready');

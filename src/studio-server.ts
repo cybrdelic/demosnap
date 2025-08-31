@@ -15,7 +15,7 @@ export function createStudioServer() {
   const outRoot = path.resolve('studio_out');
   fs.mkdirSync(outRoot, { recursive: true });
 
-  app.post('/api/compose', async (req, res) => {
+  app.post('/api/compose', async (req: any, res: any) => {
     const { url, title, subtitle } = req.body || {};
     if (!url || typeof url !== 'string') {
       return res.status(400).json({ error: 'Missing url' });
@@ -23,13 +23,14 @@ export function createStudioServer() {
     try {
       const ts = Date.now();
       const outDir = path.join(outRoot, 'job_' + ts);
+      const minDurationEnv = process.env.MIN_DURATION ? Number(process.env.MIN_DURATION) : 8000;
       const result = await runPipeline({
         url,
         title,
         subtitle,
         outDir,
         theme: 'minimal',
-        minDuration: 8000, // Ensure at least 8 seconds for proper video duration
+        minDuration: isFinite(minDurationEnv) && minDurationEnv > 0 ? minDurationEnv : 8000, // override via env
       });
       // Persist meta for UI enhancements
       try {
@@ -56,7 +57,7 @@ export function createStudioServer() {
   });
 
   // Compose from raw YAML (flow definition). Accepts { yaml, title?, subtitle? }
-  app.post('/api/compose-yaml', async (req, res) => {
+  app.post('/api/compose-yaml', async (req: any, res: any) => {
     const { yaml, title, subtitle } = req.body || {};
     if (!yaml || typeof yaml !== 'string') return res.status(400).json({ error: 'Missing yaml' });
     try {
@@ -93,6 +94,7 @@ export function createStudioServer() {
       let firstUrl: string | undefined;
       const m = finalYaml.match(/action:\s*goto\s*\n\s*url:\s*"?([^"\n]+)"?/);
       if (m) firstUrl = m[1].trim();
+      const minDurationEnv = process.env.MIN_DURATION ? Number(process.env.MIN_DURATION) : 8000;
       const result = await runPipeline({
         url: firstUrl || 'about:blank',
         title,
@@ -100,7 +102,7 @@ export function createStudioServer() {
         outDir,
         theme: 'minimal',
         flowPath,
-        minDuration: 8000, // Ensure at least 8 seconds for YAML flows too
+        minDuration: isFinite(minDurationEnv) && minDurationEnv > 0 ? minDurationEnv : 8000,
       });
       try {
         fs.writeFileSync(
@@ -124,7 +126,7 @@ export function createStudioServer() {
     }
   });
 
-  app.post('/api/auto-flow', async (req, res) => {
+  app.post('/api/auto-flow', async (req: any, res: any) => {
     const { url, maxActions, jobId } = req.body || {};
     if (!url) return res.status(400).json({ error: 'Missing url' });
     const id = jobId || 'af_' + Date.now();
@@ -149,7 +151,7 @@ export function createStudioServer() {
   });
 
   // Simple Server-Sent Events stream for live auto-flow progress (one-shot per request)
-  app.get('/api/auto-flow/stream', async (req, res) => {
+  app.get('/api/auto-flow/stream', async (req: any, res: any) => {
     const url = req.query.url as string;
     const maxActions = req.query.maxActions ? Number(req.query.maxActions) : 6;
     if (!url) {
@@ -178,7 +180,7 @@ export function createStudioServer() {
     }
   });
 
-  app.get('/api/jobs', (_req, res) => {
+  app.get('/api/jobs', (_req: any, res: any) => {
     const jobs = fs
       .readdirSync(outRoot)
       .filter((f) => f.startsWith('job_'))
@@ -207,17 +209,34 @@ export function createStudioServer() {
     res.json(jobs);
   });
 
+  // Delete a job directory and its artifacts
+  app.delete('/api/jobs/:id', (req: any, res: any) => {
+    const id = String(req.params.id || '');
+    if (!/^job_\d+$/.test(id)) {
+      return res.status(400).json({ error: 'Invalid id' });
+    }
+    const dir = path.join(outRoot, id);
+    try {
+      if (!fs.existsSync(dir)) return res.status(404).json({ error: 'Not found' });
+      fs.rmSync(dir, { recursive: true, force: true });
+      res.json({ ok: true, id });
+    } catch (e: any) {
+      console.error('[studio] delete error', e);
+      res.status(500).json({ error: e.message || 'delete failed' });
+    }
+  });
+
   // Static with no cache to avoid stale video/cover
   app.use(
     '/studio_out',
     express.static(outRoot, {
-      setHeaders: (res) => {
+      setHeaders: (res: any) => {
         res.setHeader('Cache-Control', 'no-store');
       },
     })
   );
 
-  app.get('/', (_req, res) => {
+  app.get('/', (_req: any, res: any) => {
     res.sendFile(path.join(__dirname, '..', 'public', 'studio.html'));
   });
   app.use(express.static(path.join(__dirname, '..', 'public')));

@@ -10,7 +10,8 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "outDir": "dist",
-    "types": ["node", "playwright"]
+  "types": ["node", "playwright", "react"],
+    "jsx": "react-jsx"
   },
   "include": ["src", "flows"],
   "exclude": ["node_modules", "dist"]

@@ -89,11 +89,12 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   const { raw, events } = await recordRaw(flow, { outDir: options.outDir, width, height, speed, minDuration, debug: !!options.debug });
 
   // Start ephemeral server to serve raw video for composition
-  const app = createServer(raw);
+  const app = createServer(raw, events);
   const server = http.createServer(app);
-  await new Promise<void>(res => server.listen(0, res));
+  await new Promise<void>((res) => server.listen(0, res));
   const port = (server.address() as any).port;
-  const videoUrl = `http://localhost:${port}/video`;
+  const base = `http://localhost:${port}`;
+  const videoUrl = `${base}/video`;
 
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = path.dirname(__filename);
@@ -110,15 +111,16 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     duration: Math.max(minDuration, 8000),
     title: options.title,
     subtitle: options.subtitle,
-  theme,
-    timelineBase64: Buffer.from(JSON.stringify(events)).toString('base64'),
+    theme,
+    // Instead of embedding giant base64 timeline (can exceed header limits), pass small marker; compositor will fetch /timeline
+    timelineBase64: Buffer.from(JSON.stringify({ serverTimeline: true })).toString('base64'),
     debug: options.debug,
     videoBitrateKbps: options.videoBitrateKbps ?? 10000,
     fps: options.fps ?? 30,
     quality,
     link,
     letterbox,
-  hud: 'minimal'
+    hud: 'minimal',
   });
   server.close();
   // Persist timeline events for client-side HUD previews

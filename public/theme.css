@@ -487,6 +487,19 @@ html, body {
 .preview-area { min-height: 200px; background: var(--color-bg-alt); border: 1px solid var(--color-border); display: flex; align-items: center; justify-content: center; color: var(--color-text-dim); }
 .progress-initial { width: 0%; }
 
+/* Jobs layout enhancements */
+.jobs-toolbar { display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap; margin-bottom:12px; }
+.jobs-toolbar-title { font:500 11px var(--font-mono); letter-spacing:.18em; text-transform:uppercase; color:var(--hud-label); }
+.jobs-toolbar-actions { display:flex; gap:8px; }
+.jobs-grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); }
+.btn-danger-outline { color:var(--color-danger); border-color:var(--color-danger); }
+.job-card { border:1px solid var(--color-border); padding:12px; display:flex; flex-direction:column; gap:8px; position:relative; background:var(--color-surface); }
+.job-card-header { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+.job-card-title { font:600 13px/1.2 system-ui; }
+.job-card-sub { font:500 10px/1.2 var(--font-mono); letter-spacing:.14em; color:var(--hud-label); }
+.job-card-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.job-card-meta { font:400 9px/1.2 var(--font-mono); letter-spacing:.18em; color:var(--hud-label); }
+
 body { min-height:100vh; }
 
 h1,h2,h3,h4 { margin:0; font-weight:600; letter-spacing:.02em; }

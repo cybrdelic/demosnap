@@ -4,28 +4,31 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Compositor</title>
+<link rel="stylesheet" href="/theme.css" />
 <style>
-  html,body { margin:0; padding:0; overflow:hidden; background:#020617; font-family: system-ui, sans-serif; }
-  #overlay { position: absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; color:white; text-align:center; pointer-events:none; }
-  h1 { font-size: clamp(2.5rem,4vw,4rem); margin:.2em 0 .1em; letter-spacing:.02em; }
-  h2 { font-size: clamp(1.1rem,2vw,1.6rem); margin:0; font-weight:400; opacity:.85; }
-  .origin { position:absolute; bottom:1rem; right:1rem; font-size:.75rem; letter-spacing:.08em; opacity:.6; }
+  /* Minimal compositor baseline */
+  html,body { margin:0; padding:0; overflow:hidden; font-family:system-ui,sans-serif; background:var(--color-bg,#0c1117); }
+  body.theme-teaser { background:radial-gradient(circle at 35% 22%,#062035 0%, #031422 55%, #010b17 100%); }
+  #overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--color-text,#eee); pointer-events:none; text-align:center; font-weight:500; }
+  h1 { font:600 clamp(1.4rem,3vw,2.6rem)/1.1 system-ui,sans-serif; margin:.1em 0 .25em; letter-spacing:.02em; }
+  h2 { font:400 clamp(.85rem,1.6vw,1.15rem)/1.25 system-ui,sans-serif; margin:0; opacity:.65; }
+  .origin { position:absolute; bottom:.85rem; right:1rem; font:500 .55rem/1 var(--font-mono,ui-monospace); letter-spacing:.14em; opacity:.55; }
   canvas { display:block; }
-  /* Cinematic / teaser extras */
-  .letterbox { position:fixed; left:0; width:100%; height:13vh; background:linear-gradient(to bottom, rgba(0,0,0,.95), rgba(0,0,0,.6)); z-index:30; pointer-events:none; transform:translateY(-100%); animation:lbSlideTop 1.2s cubic-bezier(.4,0,.2,1) forwards; }
-  .letterbox.bottom { top:auto; bottom:0; transform:translateY(100%); background:linear-gradient(to top, rgba(0,0,0,.95), rgba(0,0,0,.6)); animation:lbSlideBottom 1.2s cubic-bezier(.4,0,.2,1) .05s forwards; }
+  /* Letterbox & cinematic extras only when teaser theme */
+  .letterbox, .vignette, #grain, #edgeLift { display:none; }
+  body.theme-teaser .letterbox { display:block; position:fixed; left:0; width:100%; height:13vh; background:linear-gradient(to bottom, rgba(0,15,25,.92), rgba(0,0,0,.55)); z-index:30; pointer-events:none; transform:translateY(-100%); animation:lbSlideTop 1s cubic-bezier(.4,0,.2,1) forwards; }
+  body.theme-teaser .letterbox.bottom { top:auto; bottom:0; transform:translateY(100%); background:linear-gradient(to top, rgba(0,15,25,.92), rgba(0,0,0,.55)); animation:lbSlideBottom 1s cubic-bezier(.4,0,.2,1) .05s forwards; }
   @keyframes lbSlideTop { to { transform:translateY(0); } }
   @keyframes lbSlideBottom { to { transform:translateY(0); } }
-  #overlay h1, #overlay h2 { opacity:0; transform:translateY(20px); animation:titleRise .9s cubic-bezier(.4,0,.2,1) 0.4s forwards; }
-  #overlay h2 { animation-delay:.65s; }
+  body.theme-teaser .vignette { display:block; position:fixed; inset:0; pointer-events:none; background:radial-gradient(circle at 50% 55%, rgba(0,0,0,0) 30%, rgba(0,0,0,.55) 85%); mix-blend-mode:multiply; z-index:25; }
+  /* HUD minimal styling reuse theme tokens */
+  /* HUD styles now centralized in theme.css */
+  .hud-reticle, body.theme-teaser.minimal-hud .hud-reticle { display:none; }
+  body.theme-teaser.full-hud .hud-corner { background:linear-gradient(145deg, rgba(10,38,58,.82), rgba(3,24,38,.62)); box-shadow:0 0 0 1px rgba(57,198,255,.35); color:#63e2ff; }
+  /* Fade-in titles subtle */
+  #overlay h1, #overlay h2 { opacity:0; transform:translateY(8px); animation:titleRise .6s ease forwards; }
+  #overlay h2 { animation-delay:.2s; }
   @keyframes titleRise { to { opacity:1; transform:translateY(0); } }
-  .vignette { position:fixed; inset:0; pointer-events:none; background:radial-gradient(circle at 50% 55%, rgba(0,0,0,0) 30%, rgba(0,0,0,.55) 85%); mix-blend-mode:multiply; z-index:25; }
-  #grain { position:fixed; inset:0; pointer-events:none; mix-blend-mode:overlay; opacity:.22; z-index:26; }
-  /* Focus highlight */
-  #focusRing { position:fixed; pointer-events:none; border:2px solid rgba(255,255,255,.9); box-shadow:0 0 18px 4px rgba(255,255,255,.35), 0 0 32px 10px rgba(40,160,255,.25); border-radius:6px; z-index:40; opacity:0; transition:opacity .15s ease, transform .2s cubic-bezier(.4,0,.3,1); mix-blend-mode:screen; -webkit-backdrop-filter:blur(1px); backdrop-filter:blur(1px); }
-  #edgeLift { position:fixed; inset:0; pointer-events:none; z-index:20; mix-blend-mode:screen; opacity:.55; }
-  .theme-teaser #edgeLift { opacity:.35; }
-  body.edge-off #edgeLift { display:none; }
 </style>
 </head>
 <body>
@@ -41,7 +44,11 @@
 <div class="vignette" id="vignette" hidden></div>
 <canvas id="grain" width="0" height="0" hidden></canvas>
 <canvas id="edgeLift" width="0" height="0" hidden></canvas>
-<div id="focusRing"></div>
+<div id="focusRing" hidden></div>
+<div id="hudTL" class="hud-corner tl" data-hud><div class="hud-title">SESSION</div><div class="hud-grid" id="hudSession"></div></div>
+<div id="hudTR" class="hud-corner tr" data-hud><div class="hud-title">CAM</div><div class="hud-grid" id="hudCam"></div></div>
+<div id="hudBL" class="hud-corner bl" data-hud><div class="hud-title">EVENTS</div><div class="hud-grid" id="hudEvents"></div></div>
+<div id="hudBR" class="hud-corner br" data-hud><div class="hud-title">FRAME</div><div class="hud-grid" id="hudPerf"></div></div>
 <script>
 // Inline early boot marker so Node can detect compositor page even if module script stalls
 window.__COMPOSITOR_BOOT = true; console.log('[teaser] BOOT (inline html)');
@@ -60,6 +67,36 @@ window.__COMPOSITOR_BOOT = true; console.log('[teaser] BOOT (inline html)');
   window.__COMPOSITOR_MODULE_LOADED = function(){ done=true; console.log('[teaser] module loaded callback'); };
 })();
 </script>
+<div id="root"></div>
 <script type="module" src="./compositor.js"></script>
+<script>
+// Apply theme + HUD mode (minimal by default)
+(() => {
+  const p = new URLSearchParams(location.search);
+  const theme = p.get('theme') || 'minimal';
+  document.body.classList.add(theme === 'teaser' ? 'theme-teaser' : 'theme-minimal');
+  const hud = p.get('hud') || 'minimal';
+  if (hud === '0') document.querySelectorAll('[data-hud]').forEach(el => el.remove());
+  else if (hud === 'minimal') document.body.classList.add('minimal-hud');
+  else document.body.classList.add('full-hud');
+  // Safety watchdog: if compositor main hasn't started, create a fallback looping video element
+  setTimeout(() => {
+    if (!window.__COMPOSITOR_MAIN_STARTED) {
+      console.warn('[teaser] fallback watchdog: main not started, injecting raw video element');
+      try {
+        const src = p.get('video');
+        if (src) {
+          const v = document.createElement('video');
+          v.src = src;
+          v.autoplay = true; v.loop = true; v.muted = true; v.playsInline = true;
+          v.style.position='absolute'; v.style.inset='0'; v.style.width='100%'; v.style.height='100%'; v.style.objectFit='cover';
+          document.body.appendChild(v);
+          if (!window.COMPOSITOR_READY) window.COMPOSITOR_READY = true;
+        }
+      } catch(e){ console.error('[teaser] fallback video inject failed', e); }
+    }
+  }, 2200);
+})();
+</script>
 </body>
 </html>

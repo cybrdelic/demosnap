@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ShaderState } from '../types/shared.js';
+import type { ShaderState } from '../../types/shared.js';
 
 interface ShaderDevPanelProps {
   shaderState: ShaderState;
